@@ -43,6 +43,23 @@ repos:
 
   - repo: local
     hooks:
+      - id: frontend-typecheck
+        name: Frontend typecheck (tsc --noEmit)
+        entry: bash -c 'cd frontend && bun install --silent && bun run typecheck'
+        language: system
+        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig\.json)
+        pass_filenames: false
+
+      - id: frontend-lint
+        name: Frontend lint + format check (biome)
+        # Uses `biome check` (what CI runs) rather than `--write` so a dirty
+        # tree fails the commit instead of auto-fixing and re-staging behind
+        # the dev's back. Run `cd frontend && bun run format` manually.
+        entry: bash -c 'cd frontend && bun install --silent && bun run lint'
+        language: system
+        files: ^frontend/(src/|package\.json|bun\.lock|biome\.json)
+        pass_filenames: false
+
       - id: build-frontend
         name: Build frontend (vite → src/polyphony/static/)
         # bash -c because pre-commit's entry is a single command; we need

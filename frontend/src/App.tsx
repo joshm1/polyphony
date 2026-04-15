@@ -79,7 +79,8 @@ export default function App({ data }: AppProps) {
   const correctionsByChunk = useMemo(() => {
     const map = new Map<number, { original: string; replacement: string; user: boolean }[]>();
     flags.forEach((f, i) => {
-      const dec = wordDecisions.get(i) ?? ({ kind: "suggested", value: f.suggested } as WordDecision);
+      const dec =
+        wordDecisions.get(i) ?? ({ kind: "suggested", value: f.suggested } as WordDecision);
       if (dec.kind === "original") return;
       if (!map.has(f.chunk_idx)) map.set(f.chunk_idx, []);
       map.get(f.chunk_idx)?.push({
@@ -168,17 +169,14 @@ export default function App({ data }: AppProps) {
 
   // ---------- mutations ----------
 
-  const setSpeaker = useCallback(
-    (ch: Chunk, s: number) => {
-      setOverrides((prev) => {
-        const m = new Map(prev);
-        if (s === ch.final && m.has(ch.idx)) m.delete(ch.idx);
-        else m.set(ch.idx, s);
-        return m;
-      });
-    },
-    [],
-  );
+  const setSpeaker = useCallback((ch: Chunk, s: number) => {
+    setOverrides((prev) => {
+      const m = new Map(prev);
+      if (s === ch.final && m.has(ch.idx)) m.delete(ch.idx);
+      else m.set(ch.idx, s);
+      return m;
+    });
+  }, []);
 
   const chooseDecision = useCallback((i: number, kind: WordDecision["kind"], value: string) => {
     setWordDecisions((prev) => {
@@ -283,8 +281,7 @@ export default function App({ data }: AppProps) {
       const selected = sel.toString().trim();
       if (!selected) return;
       const container = range.commonAncestorContainer;
-      const parentEl =
-        container.nodeType === 1 ? (container as Element) : container.parentElement;
+      const parentEl = container.nodeType === 1 ? (container as Element) : container.parentElement;
       const textEl = parentEl?.closest<HTMLElement>(".text[data-chunk-idx]");
       if (!textEl?.dataset.chunkIdx) return;
       const chunkIdx = Number.parseInt(textEl.dataset.chunkIdx, 10);
@@ -428,7 +425,10 @@ export default function App({ data }: AppProps) {
     playFromChunk,
   ]);
 
-  // Scroll focused card into view when it changes.
+  // Scroll focused card into view when it changes. The effect body
+  // doesn't literally read focusedWordIdx (it just queries the DOM), but
+  // we want it to fire exactly when focus changes — so keep the dep.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focusedWordIdx is the trigger, not a value read in the body
   useEffect(() => {
     if (mode !== "words") return;
     const el = document.querySelector<HTMLElement>(".word-card.focused");
@@ -707,21 +707,32 @@ export default function App({ data }: AppProps) {
               flags.map((flag, i) => {
                 const dec = decisionOf(i);
                 const chunk = chunkById(flag.chunk_idx);
-                const ctxBefore =
-                  chunk && chunk.text.includes(flag.original)
-                    ? chunk.text.split(flag.original)[0]
-                    : null;
-                const ctxAfter =
-                  chunk && chunk.text.includes(flag.original)
-                    ? chunk.text.split(flag.original).slice(1).join(flag.original)
-                    : null;
+                const ctxBefore = chunk?.text.includes(flag.original)
+                  ? chunk.text.split(flag.original)[0]
+                  : null;
+                const ctxAfter = chunk?.text.includes(flag.original)
+                  ? chunk.text.split(flag.original).slice(1).join(flag.original)
+                  : null;
                 const isPlaying = chunk?.idx === playingChunkIdx;
+                // Composite key: chunk_idx + original span is stable across
+                // reorders. A plain index would conflate entries when the
+                // user adds a manual correction in the middle of the list.
+                const cardKey = `${flag.chunk_idx}:${flag.original}`;
                 return (
                   <div
-                    key={i}
+                    key={cardKey}
                     className={`word-card${i === focusedWordIdx ? " focused" : ""}${dec.kind === "original" ? " resolved" : ""}${isPlaying ? " now-playing" : ""}`}
                     data-word-chunk={flag.chunk_idx}
+                    // biome-ignore lint/a11y/useSemanticElements: the card contains nested buttons + inputs; wrapping it in a real <button> produces invalid HTML (interactive elements can't nest). div + role=button is the correct ARIA pattern here.
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setFocusedWordIdx(i)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setFocusedWordIdx(i);
+                      }
+                    }}
                   >
                     <div className="word-context">
                       {ctxBefore !== null ? (
@@ -870,10 +881,7 @@ export default function App({ data }: AppProps) {
       </div>
 
       {popover.open && (
-        <div
-          className="word-popover"
-          style={{ top: popover.top, left: popover.left }}
-        >
+        <div className="word-popover" style={{ top: popover.top, left: popover.left }}>
           <div className="label">
             Replace <code>&ldquo;{popover.original}&rdquo;</code> with:
           </div>
