@@ -131,7 +131,7 @@ def load_paragraphs(audio_path: Path, expected_turns: int) -> list[list[str]] | 
     reconciler/backend change altered the turn count — if it doesn't
     match, we treat the cache as invalid and recompute.
     """
-    path = _dir_for(audio_path, "paragraphize-haiku-4-5-v1") / "paragraphs.json"
+    path = _dir_for(audio_path, "paragraphize-haiku-v1") / "paragraphs.json"
     if not path.exists():
         return None
     try:
@@ -156,6 +156,6 @@ def load_paragraphs(audio_path: Path, expected_turns: int) -> list[list[str]] | 
 
 
 def save_paragraphs(audio_path: Path, paragraphs: list[list[str]]) -> None:
-    path = _dir_for(audio_path, "paragraphize-haiku-4-5-v1") / "paragraphs.json"
+    path = _dir_for(audio_path, "paragraphize-haiku-v1") / "paragraphs.json"
     path.write_text(json.dumps(paragraphs, ensure_ascii=False))
     logger.info(f"Saved paragraphs cache: {path}")
