@@ -119,3 +119,43 @@ def save_asr_flags(audio_path: Path, flags) -> None:
     payload = [f.as_dict() for f in flags]
     path.write_text(json.dumps(payload))
     logger.info(f"Saved ASR flags cache: {path}")
+
+
+# ---------- Paragraphize ----------
+
+
+def load_paragraphs(audio_path: Path, expected_turns: int) -> list[list[str]] | None:
+    """Load cached LLM-chosen paragraphs, or None if missing / wrong shape.
+
+    `expected_turns` guards against a stale cache written before a
+    reconciler/backend change altered the turn count — if it doesn't
+    match, we treat the cache as invalid and recompute.
+    """
+    path = _dir_for(audio_path, "paragraphize-haiku-4-5-v1") / "paragraphs.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Paragraph cache read failed ({e}); will recompute.")
+        return None
+    if not isinstance(data, list) or len(data) != expected_turns:
+        logger.info(
+            f"Paragraph cache has {len(data) if isinstance(data, list) else '?'} "
+            f"turn(s), need {expected_turns}; will recompute."
+        )
+        return None
+    out: list[list[str]] = []
+    for entry in data:
+        if not isinstance(entry, list) or not all(isinstance(p, str) for p in entry):
+            logger.warning("Paragraph cache had malformed entry; will recompute.")
+            return None
+        out.append(entry)
+    logger.info(f"Loaded paragraphs for {len(out)} turn(s) from cache: {path}")
+    return out
+
+
+def save_paragraphs(audio_path: Path, paragraphs: list[list[str]]) -> None:
+    path = _dir_for(audio_path, "paragraphize-haiku-4-5-v1") / "paragraphs.json"
+    path.write_text(json.dumps(paragraphs, ensure_ascii=False))
+    logger.info(f"Saved paragraphs cache: {path}")
