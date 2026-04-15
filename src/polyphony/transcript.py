@@ -26,7 +26,7 @@ from loguru import logger
 
 from .types import Chunk, ChunkLabel
 
-PARAGRAPHIZE_MODEL = "claude-haiku-4-5-20251001"
+PARAGRAPHIZE_MODEL = "haiku"
 
 _JSON_ARRAY_RE = re.compile(r"\[[\s\S]*]")
 _WHITESPACE = re.compile(r"\s+")
