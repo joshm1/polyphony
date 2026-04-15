@@ -33,6 +33,18 @@ mise.toml
 .mise.local.toml
 .envrc
 .env
+.env.*
+!.env.example
+!.env.template
+*.env.local
+*.local
+settings.local.json
+
+# Certs / keys — never commit these.
+*.pem
+*.key
+*.p12
+*.pfx
 
 # polyphony runtime outputs (don't commit user audio or generated transcripts)
 *.transcript.md
