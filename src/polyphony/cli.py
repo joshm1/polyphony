@@ -20,8 +20,9 @@ from loguru import logger
 from .asr_correction import flag_asr_errors
 from .backends import BackendUnavailable, resolve_backend
 from .backends.base import BackendConfig
+from .paragraphize import paragraphize_via_gemini
 from .serve import dump_labels_sidecar, serve_review
-from .transcript import build_transcript, paragraphize_via_claude
+from .transcript import build_transcript
 
 # `claude -p` inherits the working directory's skills, so $POLYPHONY_CLAUDE_CWD
 # lets you point Claude at a directory whose project-level skills you want
@@ -169,11 +170,12 @@ def transcribe_cmd(
 
     per_turn_paragraphs = None
     if not no_paragraphize:
-        per_turn_paragraphs = paragraphize_via_claude(
+        per_turn_paragraphs = paragraphize_via_gemini(
             labels,
             name_list,
             context_hint=context_hint,
-            claude_cwd=claude_cwd,
+            project=project,
+            location=location,
             source_audio=audio_path,
         )
 
