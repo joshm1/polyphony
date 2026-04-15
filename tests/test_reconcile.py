@@ -1,13 +1,15 @@
-"""Tests for the pure-logic reconciliation paths.
+"""Tests for the pure-logic reconciliation + transcript-rendering paths.
 
 Anything that shells out to `claude -p` is mocked at the boundary; we only
-exercise the local resolution rules and the JSON parser. The real reconciler
-behavior is integration-tested by running polyphony on real audio.
+exercise the local resolution rules, the reconciler JSON parser, and the
+LLM-paragraph round-trip validator. The real reconciler and paragraphize
+behavior are integration-tested by running polyphony on real audio.
 """
 
 from __future__ import annotations
 
 from polyphony.reconcile import _parse_reconciler_json, reconcile
+from polyphony.transcript import _parse_paragraphs
 from polyphony.types import Chunk
 
 
@@ -67,3 +69,47 @@ def test_parse_reconciler_json_defaults_bad_confidence_to_50():
     raw = '[{"id": 0, "speaker": 1, "confidence": "very high"}]'
     decisions = _parse_reconciler_json(raw)
     assert decisions[0].confidence == 50
+
+
+# ---------- transcript._parse_paragraphs (LLM response validator) ----------
+
+
+def test_parse_paragraphs_accepts_matching_round_trip():
+    raw = '[{"id": 0, "paragraphs": ["Hello.", "World."]}]'
+    result = _parse_paragraphs(raw, ["Hello. World."])
+    assert result == [["Hello.", "World."]]
+
+
+def test_parse_paragraphs_rejects_wrong_turn_count():
+    raw = '[{"id": 0, "paragraphs": ["One."]}]'
+    assert _parse_paragraphs(raw, ["One.", "Two."]) is None
+
+
+def test_parse_paragraphs_rejects_word_drift():
+    # Claude "cleaned up" the text — must be rejected, not silently accepted.
+    raw = '[{"id": 0, "paragraphs": ["Hi there, how are you?"]}]'
+    assert _parse_paragraphs(raw, ["hi there how are you"]) is None
+
+
+def test_parse_paragraphs_tolerates_whitespace_normalization():
+    # Extra spaces between paragraphs vs the input — should still match.
+    raw = '[{"id": 0, "paragraphs": ["First paragraph.", "Second paragraph."]}]'
+    result = _parse_paragraphs(raw, ["First paragraph.   Second paragraph."])
+    assert result == [["First paragraph.", "Second paragraph."]]
+
+
+def test_parse_paragraphs_tolerates_markdown_fences():
+    # A belt-and-suspenders check: Claude sometimes wraps JSON in ```json
+    # despite the "no fences" rule. The regex fallback should still find it.
+    raw = '```json\n[{"id": 0, "paragraphs": ["Hi."]}]\n```'
+    assert _parse_paragraphs(raw, ["Hi."]) == [["Hi."]]
+
+
+def test_parse_paragraphs_rejects_non_list_response():
+    raw = '{"paragraphs": ["Hi."]}'
+    assert _parse_paragraphs(raw, ["Hi."]) is None
+
+
+def test_parse_paragraphs_rejects_empty_paragraphs():
+    raw = '[{"id": 0, "paragraphs": []}]'
+    assert _parse_paragraphs(raw, ["Hi."]) is None

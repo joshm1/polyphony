@@ -21,7 +21,7 @@ from .asr_correction import flag_asr_errors
 from .backends import BackendUnavailable, resolve_backend
 from .backends.base import BackendConfig
 from .serve import dump_labels_sidecar, serve_review
-from .transcript import build_transcript
+from .transcript import build_transcript, paragraphize_via_claude
 
 # `claude -p` inherits the working directory's skills, so $POLYPHONY_CLAUDE_CWD
 # lets you point Claude at a directory whose project-level skills you want
@@ -90,6 +90,11 @@ def main(ctx):
     help="Skip the Claude ASR-error-flagging pass.",
 )
 @click.option(
+    "--no-paragraphize",
+    is_flag=True,
+    help="Skip the Claude paragraph-splitting pass (each speaker turn renders as one wall of text).",
+)
+@click.option(
     "--claude-cwd",
     type=click.Path(file_okay=False, path_type=Path),
     default=DEFAULT_CLAUDE_CWD,
@@ -125,6 +130,7 @@ def transcribe_cmd(
     context_hint: str | None,
     review_threshold: int,
     no_asr_correction: bool,
+    no_paragraphize: bool,
     claude_cwd: Path,
     project: str | None,
     location: str | None,
@@ -161,7 +167,22 @@ def transcribe_cmd(
 
     labels = selected_backend.run(audio_path, cfg)
 
-    transcript_md = build_transcript(labels, name_list, review_threshold=review_threshold)
+    per_turn_paragraphs = None
+    if not no_paragraphize:
+        per_turn_paragraphs = paragraphize_via_claude(
+            labels,
+            name_list,
+            context_hint=context_hint,
+            claude_cwd=claude_cwd,
+            source_audio=audio_path,
+        )
+
+    transcript_md = build_transcript(
+        labels,
+        name_list,
+        review_threshold=review_threshold,
+        per_turn_paragraphs=per_turn_paragraphs,
+    )
     output.write_text(transcript_md)
     logger.info(f"Wrote transcript: {output} ({len(transcript_md)} chars)")
 

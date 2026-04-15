@@ -35,10 +35,10 @@
       "end": 75.06,
       "text": "It's just been executed very thoroughly, like a really committed haiku.",
       "pyannote": 2,
-      "claude": 1,
+      "claude": 2,
       "final": 2,
-      "confidence": 82,
-      "note": "Daniel continuing his own joke riff from 0001"
+      "confidence": 100,
+      "note": "both backends agreed"
     },
     {
       "idx": 3,
@@ -46,10 +46,10 @@
       "end": 78.56,
       "text": "That is literally the kind of sentence the AI would write.",
       "pyannote": 1,
-      "claude": 2,
+      "claude": 1,
       "final": 1,
-      "confidence": 88,
-      "note": "Sam calling out Daniel's line as AI-sounding"
+      "confidence": 100,
+      "note": "both backends agreed"
     },
     {
       "idx": 4,
@@ -57,10 +57,10 @@
       "end": 79.58,
       "text": "Oh no.",
       "pyannote": 2,
-      "claude": 1,
+      "claude": 2,
       "final": 2,
-      "confidence": 85,
-      "note": "Daniel reacting with mock horror to being called AI"
+      "confidence": 100,
+      "note": "both backends agreed"
     },
     {
       "idx": 5,
@@ -68,10 +68,10 @@
       "end": 80.7,
       "text": "Yeah.",
       "pyannote": 1,
-      "claude": 2,
+      "claude": 1,
       "final": 1,
-      "confidence": 80,
-      "note": "Sam confirming Daniel's realization"
+      "confidence": 100,
+      "note": "both backends agreed"
     },
     {
       "idx": 6,
@@ -79,10 +79,10 @@
       "end": 83.5,
       "text": "Wait, hold on, am I the AI?",
       "pyannote": 2,
-      "claude": 1,
+      "claude": 2,
       "final": 2,
-      "confidence": 87,
-      "note": "Daniel playing along, asking if he's the AI"
+      "confidence": 100,
+      "note": "both backends agreed"
     },
     {
       "idx": 7,
@@ -90,10 +90,10 @@
       "end": 89.3,
       "text": "I've genuinely been wondering for several months, and I just didn't want to bring it up at brunch.",
       "pyannote": 1,
-      "claude": 2,
+      "claude": 1,
       "final": 1,
-      "confidence": 90,
-      "note": "Sam delivering the punchline about wondering for months"
+      "confidence": 100,
+      "note": "both backends agreed"
     }
   ],
   "asr_flags": []
