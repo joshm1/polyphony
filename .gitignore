@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.pyright/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Frontend (Vite/React/Bun). The built output under src/polyphony/static/ IS
+# committed so `pip install polyphony` doesn't require a Node toolchain.
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Local dev shell config — personal tokens / paths live here.
+# See mise.toml.example for a template.
+mise.toml
+.mise.local.toml
+.envrc
+.env
+
+# polyphony runtime outputs (don't commit user audio or generated transcripts)
+*.transcript.md
+*.review.html
+*.transcript.polyphony.json
+# …except the demo run that ships with the repo so visitors can see real output
+!examples/demo.local.transcript.md
+!examples/demo.local.transcript.polyphony.json

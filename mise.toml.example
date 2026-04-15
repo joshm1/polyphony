@@ -1,0 +1,21 @@
+# Copy to `mise.toml` and fill in your own HF_TOKEN source.
+# mise.toml is gitignored so your token loader stays private.
+#
+# The pyannote backend needs a Hugging Face token with access to:
+#   - pyannote/speaker-diarization-3.1
+#   - pyannote/segmentation-3.0
+#
+# Create one at https://huggingface.co/settings/tokens and accept both licenses.
+#
+# Three common ways to wire it up (pick one):
+
+[env]
+
+# Option 1 — plain value (simplest, but the token ends up on disk in plaintext).
+# HF_TOKEN = "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Option 2 — load from a file (token sits outside the repo).
+# HF_TOKEN = '''{{ exec(command='cat ~/.secrets/hf_token') }}'''
+
+# Option 3 — 1Password CLI (what the author uses).
+# HF_TOKEN = '''{{ exec(command='op read "op://Personal/Huggingface Token/read-only-token"') }}'''
