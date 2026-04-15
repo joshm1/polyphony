@@ -31,9 +31,7 @@ function Bootstrap() {
     );
   }
   if (!data) {
-    return (
-      <div style={{ padding: 40, color: "#8b949e", fontFamily: "system-ui" }}>Loading…</div>
-    );
+    return <div style={{ padding: 40, color: "#8b949e", fontFamily: "system-ui" }}>Loading…</div>;
   }
   return <App data={data} />;
 }
