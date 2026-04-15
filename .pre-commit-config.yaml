@@ -1,0 +1,53 @@
+# https://pre-commit.com — installed once via `pre-commit install`,
+# then runs automatically on every commit.
+#
+# The build-frontend hook is the load-bearing one for this project:
+# it rebuilds the React/Vite app under `frontend/` into its committed
+# drop point at `src/polyphony/static/` whenever any frontend source
+# changes, and fails the commit if the static bundle wasn't rebuilt
+# (so `pip install polyphony` ships a bundle that matches the source
+# in the same commit).
+#
+# Contributors need `bun` on PATH to edit the frontend; Python-only
+# contributors can commit without one as long as they don't touch
+# anything under `frontend/`.
+
+# Generated artifacts and vendored files that text-hygiene hooks must leave
+# alone. The vite build output under src/polyphony/static/ in particular
+# would otherwise play tug-of-war with end-of-file-fixer on every commit.
+exclude: |
+  (?x)^(
+      src/polyphony/static/.* |
+      frontend/bun\.lock |
+      examples/demo\.local\.transcript\..*
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]  # demo.m4a is ~1.2MB; sourcemap under static/ is ~400KB
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.10
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: build-frontend
+        name: Build frontend (vite → src/polyphony/static/)
+        # bash -c because pre-commit's entry is a single command; we need
+        # a cd + two commands. The build is fast (<1s with a warm cache).
+        entry: bash -c 'cd frontend && bun install --silent && bun run build'
+        language: system
+        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig\.json|vite\.config\.ts|index\.html|biome\.json)
+        pass_filenames: false

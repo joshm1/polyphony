@@ -1,0 +1,81 @@
+[project]
+name = "polyphony"
+version = "0.1.0"
+description = "Audio → multi-speaker transcript with ensemble diarization, per-chunk confidence, and an interactive review playground."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Josh McDade", email = "josh.ncsu@gmail.com" }
+]
+requires-python = ">=3.12"
+keywords = ["speech-to-text", "diarization", "whisper", "pyannote", "gemini", "transcription", "asr", "ensemble"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "click>=8.1",
+    "fastapi>=0.135.3",
+    "google-genai>=0.8",
+    "librosa>=0.10",
+    "loguru>=0.7",
+    "numpy>=1.26",
+    "pyannote-audio>=3.1",
+    "soundfile>=0.12",
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "transformers>=4.40",
+    "uvicorn[standard]>=0.44.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/joshm1/polyphony"
+Repository = "https://github.com/joshm1/polyphony"
+Issues = "https://github.com/joshm1/polyphony/issues"
+
+[project.scripts]
+polyphony = "polyphony:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Ship the built React playground alongside the .py modules. The frontend
+# lives in `frontend/` and builds into `src/polyphony/static/` — that
+# output is committed so installs don't require Node at install time.
+module-name = "polyphony"
+module-root = "src"
+source-include = ["src/polyphony/static/**"]
+wheel-include = ["src/polyphony/static/**"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "B008",  # click uses function calls in defaults
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

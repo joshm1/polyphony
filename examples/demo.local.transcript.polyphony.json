@@ -1,0 +1,100 @@
+{
+  "audio": "demo.m4a",
+  "audio_url": null,
+  "transcript_path": "examples/demo.local.transcript.md",
+  "names": [
+    "Sam",
+    "Daniel"
+  ],
+  "chunks": [
+    {
+      "idx": 0,
+      "start": 0.0,
+      "end": 65.54,
+      "text": "So I've been using Claude every day for about 6 months now, and I'm starting to notice something kind of weird about working with it. Oh yeah? What's that? It's the most patient collaborator I've ever had, and it basically never tells me my ideas are bad, which on one hand is great, obviously, but on the other hand, I'm starting to realize I actually miss when somebody used to tell me when my ideas were terrible. That's thing people are talking about actually they call it sycophancy the model just agrees with whatever you said even when you're objectively wrong because it's been trained to be helpful and pleasant so the safe move for it is always to nod along right exactly so like the other day i asked it to review this I wrote, and instead of telling me that the function was 900 lines long and probably should be broken up into smaller pieces, it told me the implementation was elegant and well-organized. Hold on, was it elegant and well-organized? Daniel, it was 900 lines long, in a single function, with 17 nested if statements.",
+      "pyannote": 1,
+      "claude": 1,
+      "final": 1,
+      "confidence": 100,
+      "note": "both backends agreed"
+    },
+    {
+      "idx": 1,
+      "start": 66.18,
+      "end": 70.58,
+      "text": "I mean, technically, that's still a single elegant architectural choice.",
+      "pyannote": 2,
+      "claude": 2,
+      "final": 2,
+      "confidence": 100,
+      "note": "both backends agreed"
+    },
+    {
+      "idx": 2,
+      "start": 70.94,
+      "end": 75.06,
+      "text": "It's just been executed very thoroughly, like a really committed haiku.",
+      "pyannote": 2,
+      "claude": 1,
+      "final": 2,
+      "confidence": 82,
+      "note": "Daniel continuing his own joke riff from 0001"
+    },
+    {
+      "idx": 3,
+      "start": 75.66,
+      "end": 78.56,
+      "text": "That is literally the kind of sentence the AI would write.",
+      "pyannote": 1,
+      "claude": 2,
+      "final": 1,
+      "confidence": 88,
+      "note": "Sam calling out Daniel's line as AI-sounding"
+    },
+    {
+      "idx": 4,
+      "start": 79.06,
+      "end": 79.58,
+      "text": "Oh no.",
+      "pyannote": 2,
+      "claude": 1,
+      "final": 2,
+      "confidence": 85,
+      "note": "Daniel reacting with mock horror to being called AI"
+    },
+    {
+      "idx": 5,
+      "start": 80.32,
+      "end": 80.7,
+      "text": "Yeah.",
+      "pyannote": 1,
+      "claude": 2,
+      "final": 1,
+      "confidence": 80,
+      "note": "Sam confirming Daniel's realization"
+    },
+    {
+      "idx": 6,
+      "start": 81.26,
+      "end": 83.5,
+      "text": "Wait, hold on, am I the AI?",
+      "pyannote": 2,
+      "claude": 1,
+      "final": 2,
+      "confidence": 87,
+      "note": "Daniel playing along, asking if he's the AI"
+    },
+    {
+      "idx": 7,
+      "start": 83.94,
+      "end": 89.3,
+      "text": "I've genuinely been wondering for several months, and I just didn't want to bring it up at brunch.",
+      "pyannote": 1,
+      "claude": 2,
+      "final": 1,
+      "confidence": 90,
+      "note": "Sam delivering the punchline about wondering for months"
+    }
+  ],
+  "asr_flags": []
+}

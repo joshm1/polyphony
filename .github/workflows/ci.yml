@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check src tests
+
+      - name: Format check
+        run: uv run ruff format --check src tests
+
+      - name: Python tests
+        run: uv run pytest -v
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: bun run typecheck
+
+      - name: Frontend lint (biome)
+        working-directory: frontend
+        run: bun run lint
+
+      # Rebuild the frontend and fail if the committed src/polyphony/static/
+      # bundle drifted from the source. This is the gate that keeps the
+      # committed static artifact honest.
+      - name: Build frontend + check for drift
+        working-directory: frontend
+        run: |
+          bun run build
+          cd ..
+          if ! git diff --quiet --exit-code -- src/polyphony/static/; then
+            echo "::error::src/polyphony/static/ is out of date — run 'cd frontend && bun run build' and commit the result."
+            git diff --stat -- src/polyphony/static/
+            exit 1
+          fi
+
+      - name: pre-commit
+        run: |
+          uvx pre-commit run --all-files --show-diff-on-failure --color=always
