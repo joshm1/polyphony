@@ -1,4 +1,4 @@
-"""Ask Gemini on Vertex AI to pick paragraph-break points inside speaker turns.
+"""Ask Gemini to pick paragraph-break points inside speaker turns.
 
 Design:
 - One Gemini call per transcribe. We ship a chunk-per-line input with
@@ -12,8 +12,10 @@ Design:
   belong with the thought they resolve), and oversized paragraphs get
   split at the nearest discourse marker.
 
-If Gemini isn't reachable (ADC missing, no project, API error) the caller
-falls back to one-paragraph-per-turn — the legacy wall-of-text shape.
+Routing: uses $GEMINI_API_KEY / $GOOGLE_API_KEY if present, else falls back
+to Vertex via ADC + $GOOGLE_CLOUD_PROJECT. If neither is configured (or the
+API call itself errors) the caller falls back to one-paragraph-per-turn —
+the legacy wall-of-text shape.
 """
 
 from __future__ import annotations
@@ -63,13 +65,13 @@ def paragraphize_via_gemini(
     location: str | None = None,
     source_audio: Path | None = None,
 ) -> list[list[str]] | None:
-    """Ask Gemini on Vertex AI to pick paragraph-break points.
+    """Ask Gemini to pick paragraph-break points.
 
     Returns a list aligned with `_group_into_turns`; each inner list is
-    the paragraphs for that turn. Returns None on any failure (ADC
-    missing, no project configured, API error, malformed response).
-    Callers pass the result straight to `build_transcript`; if None,
-    the markdown falls back to one-paragraph-per-turn.
+    the paragraphs for that turn. Returns None on any failure (no Gemini
+    credentials configured, API error, malformed response). Callers pass
+    the result straight to `build_transcript`; if None, the markdown
+    falls back to one-paragraph-per-turn.
     """
     turns = _group_into_turns(labels, review_threshold=100)
     if not turns:
@@ -82,19 +84,18 @@ def paragraphize_via_gemini(
         if cached is not None:
             return cached
 
-    project = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    if not project:
-        logger.warning(
-            "No GCP project set (pass --project or export $GOOGLE_CLOUD_PROJECT); skipping paragraphize pass."
-        )
-        return None
-    location = location or os.environ.get("GOOGLE_CLOUD_LOCATION") or PARAGRAPHIZE_LOCATION_DEFAULT
-
     try:
-        from google import genai
         from google.genai import types
     except ImportError as e:
         logger.warning(f"google-genai not installed ({e}); skipping paragraphize pass.")
+        return None
+
+    from .gemini_client import make_gemini_client
+
+    try:
+        info = make_gemini_client(project, location, PARAGRAPHIZE_LOCATION_DEFAULT)
+    except RuntimeError as e:
+        logger.warning(f"{e}; skipping paragraphize pass.")
         return None
 
     prompt = _build_prompt(labels, context_hint)
@@ -121,11 +122,10 @@ def paragraphize_via_gemini(
 
     logger.info(
         f"Paragraphizing {len(labels)} chunks / {len(turns)} turns in one Gemini call "
-        f"({PARAGRAPHIZE_MODEL}, project={project}, location={location})…"
+        f"({PARAGRAPHIZE_MODEL}, via {info.describe()})…"
     )
     try:
-        client = genai.Client(vertexai=True, project=project, location=location)
-        response = client.models.generate_content(
+        response = info.client.models.generate_content(
             model=PARAGRAPHIZE_MODEL,
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
             config=config,

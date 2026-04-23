@@ -62,8 +62,9 @@ def main(ctx):
     show_default=True,
     help=(
         "Transcription+diarization strategy. 'local' = Whisper+pyannote+Claude ensemble "
-        "(slow, offline, most robust). 'gemini' = one Gemini 2.5 call on Vertex AI "
-        "(fast, cheap, needs ADC). 'auto' picks gemini when available."
+        "(slow, offline, most robust). 'gemini' = one Gemini 2.5 call (fast, cheap; uses "
+        "$GEMINI_API_KEY if set, else Vertex AI via ADC + $GOOGLE_CLOUD_PROJECT). "
+        "'auto' picks gemini when available."
     ),
 )
 @click.option(

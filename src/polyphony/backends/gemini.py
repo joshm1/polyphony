@@ -1,4 +1,4 @@
-"""Gemini 2.5 (Vertex AI) backend: one multimodal call does everything.
+"""Gemini 2.5 backend: one multimodal call does everything.
 
 Sends the audio + a structured prompt to Gemini and receives JSON-shaped
 speaker turns back. Gemini handles ASR and speaker attribution in one shot,
@@ -6,15 +6,20 @@ using content context (role cues, names, conversational flow) as well as
 voice features. Typically cheaper and faster than the local ensemble,
 especially for interview-style audio.
 
-Uploads large files to GCS (anything above ~15 MB) because Vertex inline-data
-limits apply per request. Auth reuses Application Default Credentials.
+Auth picks the cheaper path first: if `$GEMINI_API_KEY` / `$GOOGLE_API_KEY`
+is set we hit the Gemini Generative Language API directly. Otherwise we fall
+back to Vertex AI, which needs a GCP project + ADC.
+
+Files above ~15 MB get compressed (Opus 24kbps mono); if they still don't fit
+inline, the last resort is uploading to GCS — which requires the Vertex path
+because it needs a project and `gcloud`. On the API-key path, files that stay
+oversized even after compression are rejected with a clear error.
 """
 
 from __future__ import annotations
 
 import json
 import mimetypes
-import os
 import re
 import shutil
 import subprocess
@@ -24,6 +29,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from ..gemini_client import GeminiClientInfo, make_gemini_client
 from ..types import Chunk, ChunkLabel
 from .base import Backend, BackendConfig, BackendUnavailable
 
@@ -60,21 +66,14 @@ class GeminiBackend(Backend):
             raise BackendUnavailable(f"google-genai not installed: {e}") from e
 
     def run(self, audio_path: Path, cfg: BackendConfig) -> list[ChunkLabel]:
-        from google import genai
         from google.genai import types
 
-        project = cfg.project or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        if not project:
-            raise BackendUnavailable(
-                "No GCP project set. Pass --project or export "
-                "$GOOGLE_CLOUD_PROJECT (a project with the Vertex AI API enabled "
-                "and Application Default Credentials configured via `gcloud auth "
-                "application-default login`)."
-            )
-        location = cfg.location or os.environ.get("GOOGLE_CLOUD_LOCATION") or DEFAULT_LOCATION
+        try:
+            info = make_gemini_client(cfg.project, cfg.location, DEFAULT_LOCATION)
+        except RuntimeError as e:
+            raise BackendUnavailable(str(e)) from e
+        client = info.client
         model = cfg.model or DEFAULT_MODEL
-
-        client = genai.Client(vertexai=True, project=project, location=location)
 
         # Compress-if-needed lives inside a temp dir so the reduced file
         # auto-cleans. Keep the full Gemini call inside the `with` so any
@@ -83,7 +82,7 @@ class GeminiBackend(Backend):
         with tempfile.TemporaryDirectory(prefix="polyphony_gemini_") as td:
             audio_part = self._audio_part(
                 audio_path,
-                project,
+                info,
                 cfg.gcs_bucket,
                 types,
                 Path(td),
@@ -122,7 +121,7 @@ class GeminiBackend(Backend):
                 )
             ]
 
-            logger.info(f"Calling Gemini {model} on Vertex (project={project}, location={location})…")
+            logger.info(f"Calling Gemini {model} via {info.describe()}…")
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -151,7 +150,7 @@ class GeminiBackend(Backend):
     def _audio_part(
         self,
         audio_path: Path,
-        project: str,
+        info: GeminiClientInfo,
         bucket: str | None,
         types,
         tmpdir: Path,
@@ -187,6 +186,17 @@ class GeminiBackend(Backend):
             )
 
         # Compression wasn't enough (very long audio) — last-resort GCS path.
+        # GCS upload requires a project (it shells out to `gcloud`), so the
+        # direct-API-key path can't take this fork.
+        if info.mode != "vertex" or info.project is None:
+            raise RuntimeError(
+                f"Audio is {size / 1024 / 1024:.1f} MB and even after compression "
+                f"to Opus 24kbps mono it's {csize / 1024 / 1024:.1f} MB, still "
+                f"> {INLINE_BYTE_LIMIT // 1024 // 1024} MB inline cap. For audio this "
+                "long, switch to the Vertex path: set $GOOGLE_CLOUD_PROJECT (+ ADC) "
+                "and provide --gcs-bucket / $POLYPHONY_GCS_BUCKET so polyphony can "
+                "upload. (The Gemini direct-API path only supports inline audio.)"
+            )
         if not bucket:
             raise RuntimeError(
                 f"Audio is {size / 1024 / 1024:.1f} MB and even after compression "
@@ -195,7 +205,7 @@ class GeminiBackend(Backend):
                 "long, either chunk it locally or provide --gcs-bucket / "
                 "$POLYPHONY_GCS_BUCKET so polyphony can upload."
             )
-        uri = _upload_to_gcs(compressed, bucket, project)
+        uri = _upload_to_gcs(compressed, bucket, info.project)
         return types.Part.from_uri(file_uri=uri, mime_type="audio/ogg")
 
     def _build_prompt(self, names: list[str] | None, context_hint: str | None) -> str:
