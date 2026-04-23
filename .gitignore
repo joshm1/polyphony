@@ -38,6 +38,7 @@ mise.toml
 !.env.template
 *.env.local
 *.local
+*.local.*
 settings.local.json
 
 # Certs / keys — never commit these.
