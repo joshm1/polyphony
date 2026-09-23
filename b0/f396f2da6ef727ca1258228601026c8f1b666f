@@ -1,0 +1,32 @@
+src/polyphony/filing.py
+  s_1dad9d6629ee5e::t_d7277ca0ad2099 159-164,189-193
+src/polyphony/static/assets/main.js
+  s_1dad9d6629ee5e::t_07b61b7ecfb188 1,9,17,25,33,37-38,40-41
+frontend/src/types.ts
+  s_1dad9d6629ee5e::t_d7277ca0ad2099 41
+frontend/src/App.tsx
+  s_1dad9d6629ee5e::t_d7277ca0ad2099 621-622
+  s_1dad9d6629ee5e::t_07b61b7ecfb188 702-711
+src/polyphony/serve.py
+  s_1dad9d6629ee5e::t_d7277ca0ad2099 36,152-157
+tests/test_filing.py
+  s_1dad9d6629ee5e::t_07b61b7ecfb188 70-89
+src/polyphony/static/assets/main.js.map
+  s_1dad9d6629ee5e::t_449243f74478bc 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b0f396f2da6ef727ca1258228601026c8f1b666f",
+  "prompts": {},
+  "sessions": {
+    "s_1dad9d6629ee5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4e225c1-4b9b-4568-85a0-a1ed1a8f4c4e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
