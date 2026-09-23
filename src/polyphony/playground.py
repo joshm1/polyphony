@@ -20,6 +20,9 @@ def playground_payload(
     asr_flags: list[WordFlag],
     paragraph_breaks: list[int] | None,
     review_threshold: int,
+    backend: str,
+    llm_model: str,
+    context_hint: str | None,
     audio_url: str | None = None,
 ) -> dict:
     """Assemble the JSON payload the React app reads on load.
@@ -32,9 +35,14 @@ def playground_payload(
         "audio": audio_name,
         "audio_url": audio_url,
         "transcript_path": str(transcript_path),
+        # Indexed by speaker id - 1; "" = not named yet.
         "names": list(names),
         "review_threshold": review_threshold,
-        # Gemini-chosen break-after chunk ids; lets a review re-render paragraphs without another LLM call.
+        # How the text-side passes ran, so `POST /api/reanalyze` can rerun them the same way.
+        "backend": backend,
+        "llm_model": llm_model,
+        "context_hint": context_hint,
+        # LLM-chosen break-after chunk ids; lets a review re-render paragraphs without another LLM call.
         "paragraph_breaks": paragraph_breaks,
         # Reviewer decisions, filled in by `POST /api/apply`.
         "review": {"overrides": {}, "word_decisions": {}},
@@ -52,15 +60,16 @@ def playground_payload(
             }
             for lbl in labels
         ],
-        "asr_flags": [
-            {
-                "chunk_idx": f.chunk_idx,
-                "original": f.original,
-                "suggested": f.suggested,
-                "alternatives": f.alternatives,
-                "confidence": f.confidence,
-                "reason": f.reason,
-            }
-            for f in asr_flags
-        ],
+        "asr_flags": [flag_dict(f) for f in asr_flags],
+    }
+
+
+def flag_dict(f: WordFlag) -> dict:
+    return {
+        "chunk_idx": f.chunk_idx,
+        "original": f.original,
+        "suggested": f.suggested,
+        "alternatives": f.alternatives,
+        "confidence": f.confidence,
+        "reason": f.reason,
     }

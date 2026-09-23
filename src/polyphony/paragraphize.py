@@ -112,7 +112,7 @@ def _build_prompt(labels: list[ChunkLabel], context_hint: str | None) -> str:
     # One chunk per line: "<chunk_id> <speaker_letter>: <text>". Speaker
     # letters (A, B, …) are anonymous so we don't leak PII and save tokens
     # over spelling real names hundreds of times.
-    lines = [f"{lbl.chunk.idx} {_speaker_letter(lbl.final)}: {lbl.chunk.text.strip()}" for lbl in labels]
+    lines = [f"{lbl.chunk.idx} {_speaker_letter(lbl.effective_speaker)}: {lbl.chunk.text.strip()}" for lbl in labels]
     transcript = "\n".join(lines)
     context_line = (
         f"Context: {context_hint.strip()}" if context_hint else "Context: infer the domain from the transcript itself."

@@ -147,12 +147,64 @@ button.secondary {
   font-weight: 600;
   cursor: pointer;
 }
+button.secondary.active {
+  background: var(--accent);
+  color: #000;
+}
+.context-panel {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.context-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.context-label {
+  color: var(--muted);
+  min-width: 90px;
+}
+.speaker-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.context-panel input[type="text"] {
+  background: var(--bg);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.context-panel input.wide {
+  flex: 1;
+  min-width: 240px;
+}
+.context-actions {
+  justify-content: space-between;
+}
+.context-actions .hint {
+  color: var(--muted);
+  flex: 1;
+  min-width: 240px;
+}
 .apply-status {
   font-size: 12px;
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.apply-link {
+  font-size: 12px;
+  color: var(--accent);
 }
 .apply-status.done {
   color: var(--ok);

@@ -118,17 +118,17 @@ def save_assemblyai_words(audio_path: Path, speech_model: str, words) -> None:
 # ---------- ASR correction ----------
 
 
-def _asr_flags_stage(model: str, transcript_digest: str) -> str:
-    # Flags reference chunk ids, so they're only valid for the exact chunking
-    # they were computed on — different backends chunk the same audio differently.
-    return f"asr-correction-v2|{model}|{transcript_digest}"
+def _asr_flags_stage(model: str, prompt_digest: str) -> str:
+    # Flags reference chunk ids, so they're only valid for the exact chunking (and
+    # context hint) they were computed on — backends chunk the same audio differently.
+    return f"asr-correction-v2|{model}|{prompt_digest}"
 
 
-def load_asr_flags(audio_path: Path, model: str, transcript_digest: str):
+def load_asr_flags(audio_path: Path, model: str, prompt_digest: str):
     # Defer import to avoid a circular import at module load.
     from .asr_correction import WordFlag
 
-    path = _dir_for(audio_path, _asr_flags_stage(model, transcript_digest)) / "flags.json"
+    path = _dir_for(audio_path, _asr_flags_stage(model, prompt_digest)) / "flags.json"
     if not path.exists():
         return None
     try:
@@ -151,8 +151,8 @@ def load_asr_flags(audio_path: Path, model: str, transcript_digest: str):
     return flags
 
 
-def save_asr_flags(audio_path: Path, model: str, transcript_digest: str, flags) -> None:
-    path = _dir_for(audio_path, _asr_flags_stage(model, transcript_digest)) / "flags.json"
+def save_asr_flags(audio_path: Path, model: str, prompt_digest: str, flags) -> None:
+    path = _dir_for(audio_path, _asr_flags_stage(model, prompt_digest)) / "flags.json"
     payload = [f.as_dict() for f in flags]
     path.write_text(json.dumps(payload))
     logger.info(f"Saved ASR flags cache: {path}")

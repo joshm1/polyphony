@@ -11,10 +11,14 @@ import {
 import type {
   ApplyResult,
   Chunk,
+  Notice,
   PolyphonyData,
   PopoverState,
+  ReanalyzeResult,
   TextToken,
   Turn,
+  VaultMoveResult,
+  VaultProposal,
   WordDecision,
   WordFlag,
 } from "./types";
@@ -31,10 +35,24 @@ function fmtTime(sec: number): string {
 
 interface AppProps {
   data: PolyphonyData;
+  // Shown once after the server replaces the data (re-analyze, vault move), since the remount resets local status.
+  notice?: Notice;
+  onDataReplaced: (data: PolyphonyData, notice: Notice) => void;
 }
 
-export default function App({ data }: AppProps) {
-  const { names, audio_url: audioUrl, audio: audioName, transcript_path: transcriptPath } = data;
+type ActionStatus =
+  | { kind: "idle" }
+  | { kind: "busy"; action: "apply" | "reanalyze" | "propose" | "move" }
+  | ({ kind: "done" } & Notice)
+  | { kind: "error"; message: string };
+
+function describeResult(result: ApplyResult): string {
+  const n = result.skipped.length;
+  return `Wrote ${result.reviewed_path}${n ? ` · ${n} correction${n === 1 ? "" : "s"} not found` : ""}`;
+}
+
+export default function App({ data, notice, onDataReplaced }: AppProps) {
+  const { audio_url: audioUrl, audio: audioName, transcript_path: transcriptPath } = data;
 
   // ---------- state ----------
   const [chunks] = useState<Chunk[]>(data.chunks);
@@ -55,9 +73,17 @@ export default function App({ data }: AppProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [copyStatus, setCopyStatus] = useState(false);
-  const [applyStatus, setApplyStatus] = useState<
-    { kind: "idle" } | { kind: "busy" } | { kind: "done" | "error"; message: string }
-  >({ kind: "idle" });
+  const [applyStatus, setApplyStatus] = useState<ActionStatus>(
+    notice ? { kind: "done", ...notice } : { kind: "idle" },
+  );
+  const [names, setNames] = useState<string[]>(() => [...data.names]);
+  const [candidateNames, setCandidateNames] = useState("");
+  const [contextHint, setContextHint] = useState(data.context_hint ?? "");
+  const [contextOpen, setContextOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultFolder, setVaultFolder] = useState("");
+  const [vaultName, setVaultName] = useState("");
+  const [vaultProposal, setVaultProposal] = useState<VaultProposal | null>(null);
   const [popover, setPopover] = useState<PopoverState>({
     open: false,
     chunkIdx: null,
@@ -79,9 +105,18 @@ export default function App({ data }: AppProps) {
   );
 
   const speakerName = useCallback(
-    (id: number) => (id >= 1 && id <= names.length ? names[id - 1] : `Speaker ${id}`),
+    (id: number) => names[id - 1]?.trim() || `Speaker ${id}`,
     [names],
   );
+
+  const setNameFor = useCallback((id: number, value: string) => {
+    setNames((prev) => {
+      const next = [...prev];
+      while (next.length < id) next.push("");
+      next[id - 1] = value;
+      return next;
+    });
+  }, []);
 
   const chunkById = useCallback((idx: number) => chunks.find((c) => c.idx === idx), [chunks]);
 
@@ -499,28 +534,85 @@ export default function App({ data }: AppProps) {
     window.setTimeout(() => setCopyStatus(false), 1500);
   }, [buildApplyPrompt]);
 
+  const reviewState = useCallback(
+    () => ({
+      overrides: Object.fromEntries(overrides),
+      asr_flags: flags,
+      word_decisions: Object.fromEntries(wordDecisions),
+      names,
+    }),
+    [overrides, flags, wordDecisions, names],
+  );
+
+  const postJson = useCallback(async <T,>(url: string, body: unknown): Promise<T> => {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    return (await r.json()) as T;
+  }, []);
+
   const applyReview = useCallback(async () => {
-    setApplyStatus({ kind: "busy" });
+    setApplyStatus({ kind: "busy", action: "apply" });
     try {
-      const r = await fetch("/api/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          overrides: Object.fromEntries(overrides),
-          asr_flags: flags,
-          word_decisions: Object.fromEntries(wordDecisions),
-        }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
-      const result = (await r.json()) as ApplyResult;
-      const skipped = result.skipped.length
-        ? ` · ${result.skipped.length} correction${result.skipped.length === 1 ? "" : "s"} not found`
-        : "";
-      setApplyStatus({ kind: "done", message: `Wrote ${result.reviewed_path}${skipped}` });
+      const result = await postJson<ApplyResult>("/api/apply", reviewState());
+      setApplyStatus({ kind: "done", message: describeResult(result) });
     } catch (e: unknown) {
       setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
-  }, [overrides, flags, wordDecisions]);
+  }, [postJson, reviewState]);
+
+  const reanalyze = useCallback(async () => {
+    setApplyStatus({ kind: "busy", action: "reanalyze" });
+    try {
+      const result = await postJson<ReanalyzeResult>("/api/reanalyze", {
+        ...reviewState(),
+        candidate_names: candidateNames.split(","),
+        context_hint: contextHint,
+      });
+      onDataReplaced(
+        { ...result.data, audio_url: audioUrl },
+        { message: `Re-analyzed · ${describeResult(result)}` },
+      );
+    } catch (e: unknown) {
+      setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [postJson, reviewState, candidateNames, contextHint, onDataReplaced, audioUrl]);
+
+  const proposeVaultLocation = useCallback(async () => {
+    setApplyStatus({ kind: "busy", action: "propose" });
+    try {
+      const proposal = await postJson<VaultProposal>("/api/vault/propose", reviewState());
+      setVaultProposal(proposal);
+      setVaultFolder(proposal.folder);
+      setVaultName(proposal.basename);
+      setApplyStatus({ kind: "idle" });
+    } catch (e: unknown) {
+      setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [postJson, reviewState]);
+
+  const moveToVault = useCallback(async () => {
+    setApplyStatus({ kind: "busy", action: "move" });
+    try {
+      const result = await postJson<VaultMoveResult>("/api/vault/move", {
+        ...reviewState(),
+        folder: vaultFolder,
+        basename: vaultName,
+      });
+      const r = await fetch("/api/data");
+      if (!r.ok) throw new Error(`Moved, but reloading data failed: HTTP ${r.status}`);
+      onDataReplaced((await r.json()) as PolyphonyData, {
+        message: `Moved ${result.moved.length} files → ${result.note_path}`,
+        href: result.obsidian_url,
+        linkText: "Open in Obsidian",
+      });
+    } catch (e: unknown) {
+      setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [postJson, reviewState, vaultFolder, vaultName, onDataReplaced]);
 
   // ---------- keyhint bar ----------
 
@@ -555,16 +647,33 @@ export default function App({ data }: AppProps) {
       ? ""
       : `${focusedWordIdx + 1}/${flags.length} · ${decidedWordCount} custom decision${decidedWordCount === 1 ? "" : "s"}`;
 
+  const busy = applyStatus.kind === "busy";
   const actions = (
     <>
       <button
         type="button"
+        className={`secondary${contextOpen ? " active" : ""}`}
+        onClick={() => setContextOpen((o) => !o)}
+      >
+        Speakers & context
+      </button>
+      {data.vault && (
+        <button
+          type="button"
+          className={`secondary${vaultOpen ? " active" : ""}`}
+          onClick={() => setVaultOpen((o) => !o)}
+        >
+          Move to vault
+        </button>
+      )}
+      <button
+        type="button"
         className="primary"
         onClick={applyReview}
-        disabled={applyStatus.kind === "busy"}
+        disabled={busy}
         title="Write the reviewed transcript next to the raw one (raw is never modified)"
       >
-        {applyStatus.kind === "busy" ? "Applying…" : "Apply"}
+        {busy && applyStatus.action === "apply" ? "Applying…" : "Apply"}
       </button>
       <button type="button" className="secondary" onClick={copyApplyPrompt}>
         Copy apply prompt
@@ -574,6 +683,11 @@ export default function App({ data }: AppProps) {
         <span className={`apply-status ${applyStatus.kind}`} title={applyStatus.message}>
           {applyStatus.message}
         </span>
+      )}
+      {applyStatus.kind === "done" && applyStatus.href && (
+        <a className="apply-link" href={applyStatus.href}>
+          {applyStatus.linkText ?? "Open"}
+        </a>
       )}
     </>
   );
@@ -634,6 +748,126 @@ export default function App({ data }: AppProps) {
           </div>
         )}
       </header>
+
+      {vaultOpen && data.vault && (
+        <section className="context-panel">
+          <div className="context-row context-actions">
+            <span className="hint">
+              Files this recording into <code>{data.vault}</code>. The LLM browses the vault's
+              folder and file names (not their contents) and suggests where it belongs; nothing
+              moves until you click Move. Your current review is applied first.
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={proposeVaultLocation}
+              disabled={busy}
+            >
+              {busy && applyStatus.action === "propose" ? "Thinking…" : "Suggest location"}
+            </button>
+          </div>
+          <div className="context-row">
+            <label className="context-label" htmlFor="vault-folder">
+              Folder
+            </label>
+            <input
+              id="vault-folder"
+              type="text"
+              className="wide"
+              value={vaultFolder}
+              placeholder="Relative to the vault root"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setVaultFolder(e.target.value)}
+            />
+          </div>
+          <div className="context-row">
+            <label className="context-label" htmlFor="vault-name">
+              Name
+            </label>
+            <input
+              id="vault-name"
+              type="text"
+              className="wide"
+              value={vaultName}
+              placeholder="Without extension"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setVaultName(e.target.value)}
+            />
+          </div>
+          {vaultProposal && (
+            <div className="context-row">
+              <span className="context-label">Why</span>
+              <span className="hint">
+                {vaultProposal.reason} · moves {vaultProposal.files.join(", ")}
+              </span>
+            </div>
+          )}
+          <div className="context-row context-actions">
+            <span />
+            <button
+              type="button"
+              className="primary"
+              onClick={moveToVault}
+              disabled={busy || !vaultFolder.trim() || !vaultName.trim()}
+            >
+              {busy && applyStatus.action === "move" ? "Moving…" : "Move"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {contextOpen && (
+        <section className="context-panel">
+          <div className="context-row">
+            <span className="context-label">Speakers</span>
+            {Array.from({ length: totalSpeakers }, (_, i) => i + 1).map((id) => (
+              <label key={id} className="speaker-field">
+                <span>Speaker {id}</span>
+                <input
+                  type="text"
+                  value={names[id - 1] ?? ""}
+                  placeholder="unnamed"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setNameFor(id, e.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="context-row">
+            <label className="context-label" htmlFor="candidate-names">
+              Other names
+            </label>
+            <input
+              id="candidate-names"
+              type="text"
+              className="wide"
+              value={candidateNames}
+              placeholder="Comma-separated, any order — the LLM matches them to unnamed speakers"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setCandidateNames(e.target.value)}
+            />
+          </div>
+          <div className="context-row">
+            <label className="context-label" htmlFor="context-hint">
+              Context hint
+            </label>
+            <input
+              id="context-hint"
+              type="text"
+              className="wide"
+              value={contextHint}
+              placeholder="What's this recording? e.g. cooking podcast"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setContextHint(e.target.value)}
+            />
+          </div>
+          <div className="context-row context-actions">
+            <span className="hint">
+              Names typed above show up immediately and are saved on Apply. Re-analyze reruns the{" "}
+              {data.llm_model} passes (speaker labels, paragraphs, word suggestions) with these
+              names and hint — about 1–2 minutes. Your overrides and corrections carry over.
+            </span>
+            <button type="button" className="primary" onClick={reanalyze} disabled={busy}>
+              {busy && applyStatus.action === "reanalyze" ? "Re-analyzing…" : "Re-analyze with LLM"}
+            </button>
+          </div>
+        </section>
+      )}
 
       <main>
         {mode === "speakers" ? (

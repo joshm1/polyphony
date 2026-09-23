@@ -64,3 +64,37 @@ def test_apply_review_keeps_flag_on_unreviewed_low_confidence_turn():
     }
     markdown, _ = apply_review(data)
     assert "⚠️ Speaker 1: Hi." in markdown
+
+
+# ---------- reanalyze: name resolution + flag merging ----------
+
+
+def test_resolve_names_keeps_explicit_and_fills_rest_from_llm(monkeypatch):
+    from polyphony import reanalyze
+    from polyphony.types import Chunk, ChunkLabel
+
+    seen = {}
+
+    def fake_identify(labels, candidates, fixed, model, context_hint):
+        seen.update(candidates=candidates, fixed=fixed)
+        return {2: "Guest"}
+
+    monkeypatch.setattr(reanalyze, "identify_speakers", fake_identify)
+    labels = [
+        ChunkLabel(Chunk(i, i, i + 1, "x"), audio=s, llm=s, final=s, confidence=100) for i, s in enumerate([1, 2, 3])
+    ]
+    names = reanalyze.resolve_names(labels, ["Host", ""], ["  Guest ", ""], "m", None)
+    assert names == ["Host", "Guest", ""]
+    assert seen == {"candidates": ["Guest"], "fixed": {1: "Host"}}
+
+
+def test_merge_flags_carries_explicit_decisions_and_user_flags():
+    from polyphony.reanalyze import merge_flags
+
+    old = [_flag(1, "sauce", "SaaS"), _flag(2, "x", "y"), {**_flag(3, "a", "b"), "userAdded": True}]
+    decisions = {"0": {"kind": "original", "value": "sauce"}, "1": {"kind": "suggested", "value": "y"}}
+    new = [_flag(2, "x", "z"), _flag(1, "sauce", "sass")]
+    flags, carried = merge_flags(old, decisions, new)
+    assert [(f["chunk_idx"], f["original"]) for f in flags] == [(2, "x"), (1, "sauce"), (3, "a")]
+    # "keep original" follows its span to the new index; the default "suggested" choice is not carried.
+    assert carried == {"1": {"kind": "original", "value": "sauce"}}

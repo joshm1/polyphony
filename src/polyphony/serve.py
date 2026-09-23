@@ -8,6 +8,9 @@ small JSON API the app fetches on mount. Split by path prefix:
   GET /api/data            → the review payload (ChunkLabels + ASR flags)
   GET /api/audio           → the source audio with HTTP Range support
   POST /api/apply          → persist review decisions, write the reviewed transcript
+  POST /api/reanalyze      → rerun the LLM passes with new names / context hint
+  POST /api/vault/propose  → LLM-suggested vault folder + name for this recording
+  POST /api/vault/move     → apply the review, then move all files into the vault
 
 The React bundle has no knowledge of server-side substitution: it just
 does `fetch('/api/data')` on startup. That keeps the built HTML fully
@@ -29,7 +32,10 @@ from loguru import logger
 from pydantic import BaseModel
 
 from .asr_correction import WordFlag
+from .filing import move_recording, obsidian_url, planned_moves, propose_location
+from .llm import DEFAULT_LLM_MODEL
 from .playground import playground_payload
+from .reanalyze import reanalyze
 from .review import apply_review, reviewed_path
 from .types import ChunkLabel
 
@@ -57,6 +63,18 @@ class ApplyRequest(BaseModel):
     overrides: dict[int, int]  # chunk idx → speaker id
     asr_flags: list[ReviewFlag]  # includes reviewer-added flags
     word_decisions: dict[int, WordDecision]  # asr_flags index → decision
+    names: list[str] | None = None  # indexed by speaker id - 1; "" = unnamed; None = keep current
+
+
+class VaultMoveRequest(ApplyRequest):
+    folder: str  # relative to the vault root
+    basename: str
+
+
+class ReanalyzeRequest(ApplyRequest):
+    names: list[str]
+    candidate_names: list[str]  # any order; the LLM places them on unnamed speakers
+    context_hint: str | None
 
 
 def _find_free_port(start: int) -> int:
@@ -89,6 +107,7 @@ def serve_review(
     labels_path: Path,
     port: int = 8787,
     open_browser: bool = True,
+    vault: Path | None = None,
 ) -> None:
     import uvicorn
     from fastapi import FastAPI, HTTPException, Request
@@ -108,6 +127,10 @@ def serve_review(
     # the client needs to point its <audio> element at.
     data = json.loads(labels_path.read_text())
     data["audio_url"] = "/api/audio"
+    # Sidecars written before these fields existed.
+    data.setdefault("llm_model", DEFAULT_LLM_MODEL)
+    data.setdefault("context_hint", None)
+    data.setdefault("review", {"overrides": {}, "word_decisions": {}})
 
     app = FastAPI(title=f"polyphony review — {audio_path.name}")
 
@@ -120,7 +143,7 @@ def serve_review(
 
     @app.get("/api/data")
     def api_data() -> JSONResponse:
-        return JSONResponse(data)
+        return JSONResponse({**data, "vault": str(vault) if vault else None})
 
     @app.get("/api/audio")
     def api_audio(request: Request):
@@ -165,19 +188,82 @@ def serve_review(
             headers=headers,
         )
 
-    @app.post("/api/apply")
-    def api_apply(req: ApplyRequest) -> JSONResponse:
+    def take_review_state(req: ApplyRequest) -> None:
+        if req.names is not None:
+            data["names"] = req.names
         data["asr_flags"] = [f.model_dump(exclude_none=True) for f in req.asr_flags]
         data["review"] = {
             "overrides": {str(k): v for k, v in req.overrides.items()},
             "word_decisions": {str(k): d.model_dump() for k, d in req.word_decisions.items()},
         }
+
+    def write_outputs() -> tuple[Path, list[dict]]:
         markdown, skipped = apply_review(data)
         out = reviewed_path(labels_path)
         out.write_text(markdown)
-        labels_path.write_text(json.dumps({k: v for k, v in data.items() if k != "audio_url"}, indent=2))
+        labels_path.write_text(json.dumps({k: v for k, v in data.items() if k not in ("audio_url", "vault")}, indent=2))
         logger.info(f"Applied review → {out} ({len(skipped)} correction(s) skipped)")
+        return out, skipped
+
+    @app.post("/api/apply")
+    def api_apply(req: ApplyRequest) -> JSONResponse:
+        take_review_state(req)
+        out, skipped = write_outputs()
         return JSONResponse({"reviewed_path": str(out), "skipped": skipped})
+
+    # Sync handler on purpose: FastAPI runs it in a worker thread, so the
+    # minute-long LLM calls don't block audio streaming.
+    @app.post("/api/reanalyze")
+    def api_reanalyze(req: ReanalyzeRequest) -> JSONResponse:
+        take_review_state(req)
+        data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
+        out, skipped = write_outputs()
+        return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": data})
+
+    def require_vault() -> Path:
+        if vault is None:
+            raise HTTPException(status_code=400, detail="No vault configured: pass --vault or set $POLYPHONY_VAULT.")
+        return vault
+
+    # Sync handler: the LLM browses the vault via tools, which takes a while.
+    @app.post("/api/vault/propose")
+    def api_vault_propose(req: ApplyRequest) -> JSONResponse:
+        root = require_vault()
+        take_review_state(req)
+        markdown, _ = apply_review(data)
+        proposal = propose_location(
+            root, audio_path, markdown, data.get("names") or [], data.get("context_hint"), data["llm_model"]
+        )
+        return JSONResponse(
+            {**proposal.model_dump(), "files": [str(src.name) for src, _ in planned_moves(audio_path, root, "x")]}
+        )
+
+    @app.post("/api/vault/move")
+    def api_vault_move(req: VaultMoveRequest) -> JSONResponse:
+        nonlocal audio_path, labels_path
+        root = require_vault()
+        if labels_path.resolve() not in {src for src, _ in planned_moves(audio_path.resolve(), root, "x")}:
+            detail = f"Sidecar {labels_path} isn't next to the audio; move it there first."
+            raise HTTPException(status_code=409, detail=detail)
+        take_review_state(req)
+        write_outputs()
+        try:
+            moves = move_recording(audio_path, root, req.folder, req.basename)
+        except (ValueError, FileExistsError) as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        renamed = {src.name: dst for src, dst in moves}
+        audio_path = moves[0][1]
+        labels_path = renamed[labels_path.name]
+        # The moved sidecar was rewritten with new paths; keep serving from it.
+        data.update(json.loads(labels_path.read_text()))
+        note = reviewed_path(labels_path)
+        return JSONResponse(
+            {
+                "moved": [str(dst) for _, dst in moves],
+                "note_path": str(note),
+                "obsidian_url": obsidian_url(root, note),
+            }
+        )
 
     # Everything else → the React entrypoint. Declared last so explicit
     # routes (/assets/*, /api/*) win first.
@@ -238,6 +324,9 @@ def dump_labels_sidecar(
     transcript_path: Path,
     paragraph_breaks: list[int] | None,
     review_threshold: int,
+    backend: str,
+    llm_model: str,
+    context_hint: str | None,
 ) -> None:
     """Persist the review payload next to the transcript for `polyphony serve` to consume later."""
     data = playground_payload(
@@ -248,6 +337,9 @@ def dump_labels_sidecar(
         asr_flags=asr_flags,
         paragraph_breaks=paragraph_breaks,
         review_threshold=review_threshold,
+        backend=backend,
+        llm_model=llm_model,
+        context_hint=context_hint,
     )
     path.write_text(json.dumps(data, indent=2))
     logger.info(f"Wrote review sidecar: {path}")

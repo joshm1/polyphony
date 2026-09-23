@@ -205,6 +205,9 @@ def transcribe_cmd(
         output,
         paragraph_breaks=paragraph_breaks,
         review_threshold=review_threshold,
+        backend=selected_backend.name,
+        llm_model=llm_model,
+        context_hint=context_hint,
     )
 
     flagged = sum(1 for lbl in labels if lbl.confidence < review_threshold)
@@ -226,7 +229,14 @@ def transcribe_cmd(
 )
 @click.option("--port", type=int, default=8787, show_default=True, help="HTTP port (auto-bumps if busy).")
 @click.option("--no-open", is_flag=True, help="Don't auto-open the browser.")
-def serve_cmd(audio_path: Path, sidecar: Path | None, port: int, no_open: bool):
+@click.option(
+    "--vault",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    envvar="POLYPHONY_VAULT",
+    default=None,
+    help="Notes vault (e.g. Obsidian) the UI can file this recording into. Or set $POLYPHONY_VAULT.",
+)
+def serve_cmd(audio_path: Path, sidecar: Path | None, port: int, no_open: bool, vault: Path | None):
     """Serve the review playground over HTTP with seekable audio playback."""
     logger.remove()
     logger.add(sys.stderr, format="<dim>{time:HH:mm:ss}</dim> <level>{message}</level>")
@@ -250,4 +260,4 @@ def serve_cmd(audio_path: Path, sidecar: Path | None, port: int, no_open: bool):
                 "Run `polyphony transcribe` first, or pass --sidecar explicitly."
             )
 
-    serve_review(audio_path, sidecar, port=port, open_browser=not no_open)
+    serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault)

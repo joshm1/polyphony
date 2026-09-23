@@ -59,15 +59,6 @@ def flag_asr_errors(
         return []
 
     numbered = "\n".join(f"[{c.idx}] {c.text}" for c in chunks)
-    transcript_digest = hashlib.sha256(numbered.encode()).hexdigest()[:16]
-
-    # Cache keyed on audio + model + exact chunk listing so iterations skip the ~30-60s LLM call.
-    if source_audio is not None:
-        from .cache import load_asr_flags
-
-        cached = load_asr_flags(source_audio, model, transcript_digest)
-        if cached is not None:
-            return cached
     context_line = (
         f"Context: {context_hint.strip()}"
         if context_hint
@@ -102,6 +93,15 @@ Chunks:
 {numbered}
 """
 
+    # Cache keyed on audio + model + exact prompt (chunk listing + context) so iterations skip the LLM call.
+    prompt_digest = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    if source_audio is not None:
+        from .cache import load_asr_flags
+
+        cached = load_asr_flags(source_audio, model, prompt_digest)
+        if cached is not None:
+            return cached
+
     logger.info(f"ASR correction pass via {model} on {len(chunks)} chunks…")
     try:
         result = run_structured(prompt, _Flags, model)
@@ -113,7 +113,7 @@ Chunks:
     if source_audio is not None:
         from .cache import save_asr_flags
 
-        save_asr_flags(source_audio, model, transcript_digest, flags)
+        save_asr_flags(source_audio, model, prompt_digest, flags)
     return flags
 
 

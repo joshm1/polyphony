@@ -33,7 +33,7 @@ Then open the interactive review UI (React + Vite, served over HTTP so the `<aud
 polyphony serve examples/demo.m4a   # opens localhost:8787 in your browser
 ```
 
-Drag the confidence slider; click a speaker name to override; select text in any chunk to propose a word correction; hit **Apply** to write `<stem>.transcript.reviewed.md` next to the raw transcript (the raw file is never modified, and your decisions are saved in the sidecar so a reload resumes them). **Copy apply prompt** remains for handing edits to an AI agent instead. Keyboard nav: `j`/`k`, `1`-`9`, `/`, `Tab`, `space`, `p`.
+Drag the confidence slider; click a speaker name to override; select text in any chunk to propose a word correction; hit **Apply** to write `<stem>.transcript.reviewed.md` next to the raw transcript (the raw file is never modified, and your decisions are saved in the sidecar so a reload resumes them). **Speakers & context** lets you name speakers (typed names apply instantly) or list names in any order for the LLM to match, and set a context hint; **Re-analyze with LLM** reruns the text-side passes with them (~1–2 min) while keeping your overrides and corrections. With `--vault PATH` (or `$POLYPHONY_VAULT`), **Move to vault** asks the LLM where the recording belongs in your notes vault — it browses folder/file names, not contents, and matches nearby naming conventions — then, after you confirm or edit the folder and name, applies the review and moves the audio + all transcripts + sidecar there together. **Copy apply prompt** remains for handing edits to an AI agent instead. Keyboard nav: `j`/`k`, `1`-`9`, `/`, `Tab`, `space`, `p`.
 
 ---
 
@@ -206,6 +206,7 @@ Environment variables:
 | `POLYPHONY_GCS_BUCKET` | Bucket for audio >15MB on the Gemini backend (only needed for very long audio) |
 | `POLYPHONY_LLM_MODEL` | pydantic-ai model for the text-side LLM passes (default `openai-codex:gpt-6-sol`) |
 | `CODEX_HOME` | Where `codex login` stored `auth.json` (default `~/.codex`) |
+| `POLYPHONY_VAULT` | Notes vault (e.g. Obsidian) that `polyphony serve` can file recordings into |
 | `POLYPHONY_CACHE_DIR` | Override the cache location (default `~/.cache/polyphony`) |
 
 ---

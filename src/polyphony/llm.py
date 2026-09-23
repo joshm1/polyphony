@@ -9,6 +9,7 @@ Override with `--llm-model` / `$POLYPHONY_LLM_MODEL`.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -32,10 +33,15 @@ def check_llm(model: str) -> None:
         raise LLMUnavailable(f"LLM model {model!r} unavailable: {e}") from e
 
 
-def run_structured[T: BaseModel](prompt: str, output_type: type[T], model: str) -> T:
-    """One-shot prompt → validated `output_type`. pydantic-ai retries on schema violations."""
+def run_structured[T: BaseModel](
+    prompt: str, output_type: type[T], model: str, tools: Sequence[Callable[..., str]] = ()
+) -> T:
+    """Prompt → validated `output_type`, optionally letting the model call plain-function `tools`.
+
+    pydantic-ai retries on schema violations.
+    """
     try:
-        agent = Agent(model, output_type=output_type)
+        agent = Agent(model, output_type=output_type, tools=tools)
     except (UserError, ImportError, ValueError) as e:
         raise LLMUnavailable(f"LLM model {model!r} unavailable: {e}") from e
     return agent.run_sync(prompt).output

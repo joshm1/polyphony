@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import type { PolyphonyData } from "./types";
+import type { Notice, PolyphonyData } from "./types";
 import "./styles.css";
 
 // The React app fetches its data from the Python backend at /api/data.
@@ -9,6 +9,9 @@ import "./styles.css";
 // and means the data can be reloaded without regenerating the bundle.
 function Bootstrap() {
   const [data, setData] = useState<PolyphonyData | null>(null);
+  // Bumped when the server returns re-analyzed data, so App remounts and re-hydrates from it.
+  const [generation, setGeneration] = useState(0);
+  const [notice, setNotice] = useState<Notice | undefined>();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,7 +36,18 @@ function Bootstrap() {
   if (!data) {
     return <div style={{ padding: 40, color: "#8b949e", fontFamily: "system-ui" }}>Loading…</div>;
   }
-  return <App data={data} />;
+  return (
+    <App
+      key={generation}
+      data={data}
+      notice={notice}
+      onDataReplaced={(next, message) => {
+        setData(next);
+        setNotice(message);
+        setGeneration((g) => g + 1);
+      }}
+    />
+  );
 }
 
 const container = document.getElementById("app");

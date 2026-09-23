@@ -18,7 +18,8 @@ from .types import Chunk, ChunkLabel
 
 
 def display_name(speaker_id: int, names: list[str] | None) -> str:
-    if names and 1 <= speaker_id <= len(names):
+    # Blank entries mean "not named yet" (names are indexed by speaker id).
+    if names and 1 <= speaker_id <= len(names) and names[speaker_id - 1]:
         return names[speaker_id - 1]
     return f"Speaker {speaker_id}"
 

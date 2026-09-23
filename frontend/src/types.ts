@@ -32,8 +32,12 @@ export interface PolyphonyData {
   audio: string;
   audio_url: string | null;
   transcript_path: string;
-  names: string[];
+  names: string[]; // indexed by speaker id - 1; "" = unnamed
   review_threshold: number;
+  backend: string;
+  llm_model: string;
+  context_hint: string | null;
+  vault: string | null; // injected by the server; null when no vault is configured
   paragraph_breaks: number[] | null;
   review: ReviewState;
   chunks: Chunk[];
@@ -43,6 +47,30 @@ export interface PolyphonyData {
 export interface ApplyResult {
   reviewed_path: string;
   skipped: { chunk_idx: number; original: string }[];
+}
+
+export interface ReanalyzeResult extends ApplyResult {
+  data: PolyphonyData;
+}
+
+export interface VaultProposal {
+  folder: string;
+  basename: string;
+  reason: string;
+  files: string[];
+}
+
+export interface VaultMoveResult {
+  moved: string[];
+  note_path: string;
+  obsidian_url: string;
+}
+
+// A status line that survives App remounting after the server replaces the data.
+export interface Notice {
+  message: string;
+  href?: string;
+  linkText?: string;
 }
 
 export type WordDecisionKind = "suggested" | "alternative" | "custom" | "original";

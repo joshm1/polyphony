@@ -7,6 +7,7 @@ data rather than rewritten by an LLM. The raw transcript is never touched.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -56,35 +57,47 @@ def apply_corrections(text: str, corrections: list[tuple[str, str]]) -> tuple[st
     return "".join(parts), [orig for orig, _ in pending]
 
 
+def overrides_of(data: dict[str, Any]) -> dict[int, int]:
+    return {int(k): int(v) for k, v in ((data.get("review") or {}).get("overrides") or {}).items()}
+
+
+def labels_from_payload(data: dict[str, Any]) -> list[ChunkLabel]:
+    """The pipeline's labels as stored in the sidecar — no review decisions applied."""
+    return [
+        ChunkLabel(
+            chunk=Chunk(idx=c["idx"], start=c["start"], end=c["end"], text=c["text"]),
+            audio=c.get("audio"),
+            llm=c.get("llm"),
+            final=c["final"],
+            confidence=c["confidence"],
+            note=c.get("note", ""),
+        )
+        for c in data["chunks"]
+    ]
+
+
 def apply_review(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Render the reviewed markdown from a sidecar payload carrying a `review` block.
 
     Returns (markdown, skipped) where `skipped` lists corrections whose
     original span no longer appears in its chunk.
     """
-    review = data.get("review") or {}
-    overrides = {int(k): int(v) for k, v in (review.get("overrides") or {}).items()}
-    corrections = resolve_corrections(data.get("asr_flags") or [], review.get("word_decisions") or {})
+    overrides = overrides_of(data)
+    corrections = resolve_corrections(
+        data.get("asr_flags") or [], (data.get("review") or {}).get("word_decisions") or {}
+    )
 
     labels: list[ChunkLabel] = []
     skipped: list[dict[str, Any]] = []
-    for c in data["chunks"]:
-        idx = c["idx"]
-        text, missed = apply_corrections(c["text"], corrections.get(idx, []))
+    for lbl in labels_from_payload(data):
+        idx = lbl.chunk.idx
+        text, missed = apply_corrections(lbl.chunk.text, corrections.get(idx, []))
         skipped.extend({"chunk_idx": idx, "original": m} for m in missed)
-        override = overrides.get(idx)
-        labels.append(
-            ChunkLabel(
-                chunk=Chunk(idx=idx, start=c["start"], end=c["end"], text=text),
-                audio=c.get("audio"),
-                llm=c.get("llm"),
-                final=c["final"],
-                # A reviewer-assigned speaker is confirmed, so it shouldn't keep the turn flagged.
-                confidence=100 if override is not None else c["confidence"],
-                note="speaker set in review" if override is not None else c.get("note", ""),
-                override=override,
-            )
-        )
+        lbl.chunk = replace(lbl.chunk, text=text)
+        if (override := overrides.get(idx)) is not None:
+            # A reviewer-assigned speaker is confirmed, so it shouldn't keep the turn flagged.
+            lbl.override, lbl.confidence, lbl.note = override, 100, "speaker set in review"
+        labels.append(lbl)
 
     breaks = data.get("paragraph_breaks")
     markdown = build_transcript(
