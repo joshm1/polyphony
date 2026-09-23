@@ -156,6 +156,12 @@ Transcript:
     return run_structured(prompt, FilingProposal, model, tools=_vault_tools(vault))
 
 
+def is_filed(vault: Path, audio_path: Path) -> bool:
+    """Whether the recording already sits in its own `<name>/<name>.<ext>` folder inside the vault."""
+    audio = audio_path.resolve()
+    return vault.resolve() in audio.parents and audio.parent.name == audio.stem
+
+
 def planned_moves(audio_path: Path, dest_dir: Path, basename: str) -> list[tuple[Path, Path]]:
     """The audio plus every `<stem>.*.transcript*` sibling, renamed to `basename`."""
     stem = audio_path.stem
@@ -180,6 +186,11 @@ def move_recording(audio_path: Path, vault: Path, folder: str, basename: str) ->
     for src, dst in moves:
         shutil.move(src, dst)
         logger.info(f"Moved {src} → {dst}")
+    # Re-filing out of a previous recording folder shouldn't leave an empty shell behind.
+    old_dir = audio_path.resolve().parent
+    if is_filed(vault, audio_path) and not any(old_dir.iterdir()):
+        old_dir.rmdir()
+        logger.info(f"Removed empty folder {old_dir}")
 
     new_audio = moves[0][1]
     for _, dst in moves:

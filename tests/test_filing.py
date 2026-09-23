@@ -67,3 +67,23 @@ def test_move_recording_refuses_a_non_empty_recording_folder(tmp_path):
 def test_obsidian_url_is_vault_relative(tmp_path):
     note = tmp_path / "Health" / "a b.md"
     assert obsidian_url(tmp_path, note) == f"obsidian://open?vault={tmp_path.name}&file=Health/a%20b.md"
+
+
+def test_refiling_removes_the_emptied_recording_folder(tmp_path):
+    from polyphony.filing import is_filed
+
+    audio, vault = _recording(tmp_path)
+    move_recording(audio, vault, "Health", "2026-09-23 Visit")
+    first = vault / "Health" / "2026-09-23 Visit" / "2026-09-23 Visit.m4a"
+    assert is_filed(vault, first)
+    move_recording(first, vault, "Family", "2026-09-23 Visit Results")
+    assert not (vault / "Health" / "2026-09-23 Visit").exists()
+    assert is_filed(vault, vault / "Family" / "2026-09-23 Visit Results" / "2026-09-23 Visit Results.m4a")
+
+
+def test_loose_file_in_vault_is_not_filed(tmp_path):
+    from polyphony.filing import is_filed
+
+    (tmp_path / "Visits").mkdir()
+    assert not is_filed(tmp_path, tmp_path / "Visits" / "2026-09-23_old_style.m4a")
+    assert not is_filed(tmp_path / "Other", tmp_path / "Visits" / "Visits.m4a")

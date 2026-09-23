@@ -33,7 +33,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from .asr_correction import WordFlag
-from .filing import move_recording, obsidian_url, planned_moves, propose_location
+from .filing import is_filed, move_recording, obsidian_url, planned_moves, propose_location
 from .llm import DEFAULT_LLM_MODEL
 from .playground import playground_payload
 from .reanalyze import reanalyze
@@ -149,8 +149,12 @@ def serve_review(
 
     def client_payload() -> dict:
         """The sidecar plus server-side facts the UI needs; these never get written back."""
-        in_vault = vault is not None and vault.resolve() in audio_path.resolve().parents
-        return {**data, "vault": str(vault) if vault else None, "in_vault": in_vault, "summary_stale": summary_stale()}
+        return {
+            **data,
+            "vault": str(vault) if vault else None,
+            "filed": vault is not None and is_filed(vault, audio_path),
+            "summary_stale": summary_stale(),
+        }
 
     def summary_stale() -> bool:
         summary = data.get("summary")

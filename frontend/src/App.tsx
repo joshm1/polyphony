@@ -618,8 +618,8 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     [postJson, reviewState],
   );
 
-  // Until the recording lives in the vault, Apply files it there (after confirming the location).
-  const needsFiling = !!data.vault && !data.in_vault;
+  // Until the recording has its own folder in the vault, Apply files it there (after confirming the location).
+  const needsFiling = !!data.vault && !data.filed;
   const openFiling = useCallback(() => {
     setVaultOpen(true);
     if (!vaultProposal) void proposeVaultLocation();
@@ -699,6 +699,16 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       >
         {busy && applyStatus.action === "summarize" ? "Summarizing…" : "Summary"}
       </button>
+      {data.vault && data.filed && (
+        <button
+          type="button"
+          className={`secondary${vaultOpen ? " active" : ""}`}
+          onClick={() => (vaultOpen ? setVaultOpen(false) : openFiling())}
+          title="Re-file this recording somewhere else in the vault"
+        >
+          Move…
+        </button>
+      )}
       <button
         type="button"
         className="primary"
