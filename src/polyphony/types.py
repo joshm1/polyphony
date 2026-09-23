@@ -29,10 +29,11 @@ class ChunkLabel:
     """Final per-chunk speaker decision after ensemble reconciliation."""
 
     chunk: Chunk
-    # Each candidate holds a 1-indexed speaker id or None when the backend
+    # Each candidate holds a 1-indexed speaker id or None when that signal
     # had nothing to say for this chunk (e.g. a silent window in pyannote).
-    pyannote: int | None
-    claude: int | None
+    # `audio` is the voice-based diarizer (pyannote / AssemblyAI); `llm` is text-based.
+    audio: int | None
+    llm: int | None
     # Reconciled speaker id (always 1-indexed, never None).
     final: int
     # 0-100. Higher = more trustworthy. 100 = both backends agreed from

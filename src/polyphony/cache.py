@@ -1,4 +1,4 @@
-"""On-disk cache for expensive pipeline stages (Whisper transcription, pyannote diarization).
+"""On-disk cache for expensive pipeline stages (Whisper, pyannote, AssemblyAI, LLM passes).
 
 Key insight: Whisper on ~1h of audio takes 11+ min on MPS; pyannote on CPU
 takes 30-40 min. Losing that work to a downstream bug is painful, so we
@@ -84,14 +84,51 @@ def save_pyannote(audio_path: Path, model_id: str, segments: list[PyannoteSegmen
     logger.info(f"Saved pyannote cache: {path}")
 
 
+# ---------- AssemblyAI ----------
+
+
+def _assemblyai_stage(speech_model: str) -> str:
+    return f"assemblyai-words-v1|{speech_model}"
+
+
+def load_assemblyai_words(audio_path: Path, speech_model: str):
+    # Defer import to avoid a circular import at module load.
+    from .backends.assemblyai import Word
+
+    path = _dir_for(audio_path, _assemblyai_stage(speech_model)) / "words.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"AssemblyAI cache read failed ({e}); will recompute.")
+        return None
+    words = [Word(text=w["text"], start=w["start"], end=w["end"], speaker=w["speaker"]) for w in data]
+    logger.info(f"Loaded {len(words)} AssemblyAI words from cache: {path}")
+    return words
+
+
+def save_assemblyai_words(audio_path: Path, speech_model: str, words) -> None:
+    path = _dir_for(audio_path, _assemblyai_stage(speech_model)) / "words.json"
+    payload = [{"text": w.text, "start": w.start, "end": w.end, "speaker": w.speaker} for w in words]
+    path.write_text(json.dumps(payload))
+    logger.info(f"Saved AssemblyAI cache: {path}")
+
+
 # ---------- ASR correction ----------
 
 
-def load_asr_flags(audio_path: Path):
+def _asr_flags_stage(model: str, transcript_digest: str) -> str:
+    # Flags reference chunk ids, so they're only valid for the exact chunking
+    # they were computed on — different backends chunk the same audio differently.
+    return f"asr-correction-v2|{model}|{transcript_digest}"
+
+
+def load_asr_flags(audio_path: Path, model: str, transcript_digest: str):
     # Defer import to avoid a circular import at module load.
     from .asr_correction import WordFlag
 
-    path = _dir_for(audio_path, "asr-correction-v1") / "flags.json"
+    path = _dir_for(audio_path, _asr_flags_stage(model, transcript_digest)) / "flags.json"
     if not path.exists():
         return None
     try:
@@ -114,8 +151,8 @@ def load_asr_flags(audio_path: Path):
     return flags
 
 
-def save_asr_flags(audio_path: Path, flags) -> None:
-    path = _dir_for(audio_path, "asr-correction-v1") / "flags.json"
+def save_asr_flags(audio_path: Path, model: str, transcript_digest: str, flags) -> None:
+    path = _dir_for(audio_path, _asr_flags_stage(model, transcript_digest)) / "flags.json"
     payload = [f.as_dict() for f in flags]
     path.write_text(json.dumps(payload))
     logger.info(f"Saved ASR flags cache: {path}")
@@ -124,14 +161,13 @@ def save_asr_flags(audio_path: Path, flags) -> None:
 # ---------- Paragraphize ----------
 
 
-def load_paragraphs(audio_path: Path, expected_turns: int) -> list[list[str]] | None:
-    """Load cached LLM-chosen paragraphs, or None if missing / wrong shape.
+def _paragraph_stage(model: str, prompt_digest: str) -> str:
+    # Break ids reference chunk ids + speakers, so key on the exact prompt they came from.
+    return f"paragraphize-v3|{model}|{prompt_digest}"
 
-    `expected_turns` guards against a stale cache written before a
-    reconciler/backend change altered the turn count — if it doesn't
-    match, we treat the cache as invalid and recompute.
-    """
-    path = _dir_for(audio_path, "paragraphize-gemini-v1") / "paragraphs.json"
+
+def load_paragraph_breaks(audio_path: Path, model: str, prompt_digest: str) -> list[int] | None:
+    path = _dir_for(audio_path, _paragraph_stage(model, prompt_digest)) / "breaks.json"
     if not path.exists():
         return None
     try:
@@ -139,23 +175,14 @@ def load_paragraphs(audio_path: Path, expected_turns: int) -> list[list[str]] | 
     except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Paragraph cache read failed ({e}); will recompute.")
         return None
-    if not isinstance(data, list) or len(data) != expected_turns:
-        logger.info(
-            f"Paragraph cache has {len(data) if isinstance(data, list) else '?'} "
-            f"turn(s), need {expected_turns}; will recompute."
-        )
+    if not isinstance(data, list) or not all(isinstance(i, int) for i in data):
+        logger.warning("Paragraph cache malformed; will recompute.")
         return None
-    out: list[list[str]] = []
-    for entry in data:
-        if not isinstance(entry, list) or not all(isinstance(p, str) for p in entry):
-            logger.warning("Paragraph cache had malformed entry; will recompute.")
-            return None
-        out.append(entry)
-    logger.info(f"Loaded paragraphs for {len(out)} turn(s) from cache: {path}")
-    return out
+    logger.info(f"Loaded {len(data)} paragraph break(s) from cache: {path}")
+    return data
 
 
-def save_paragraphs(audio_path: Path, paragraphs: list[list[str]]) -> None:
-    path = _dir_for(audio_path, "paragraphize-gemini-v1") / "paragraphs.json"
-    path.write_text(json.dumps(paragraphs, ensure_ascii=False))
-    logger.info(f"Saved paragraphs cache: {path}")
+def save_paragraph_breaks(audio_path: Path, model: str, prompt_digest: str, break_ids: list[int]) -> None:
+    path = _dir_for(audio_path, _paragraph_stage(model, prompt_digest)) / "breaks.json"
+    path.write_text(json.dumps(break_ids))
+    logger.info(f"Saved paragraph breaks cache: {path}")

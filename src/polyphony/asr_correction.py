@@ -1,6 +1,6 @@
-"""Flag likely ASR errors and suggest corrections via `claude -p`.
+"""Flag likely ASR errors and suggest corrections via an LLM.
 
-Runs after diarization as an independent third pass. Claude sees the full
+Runs after diarization as an independent third pass. The LLM sees the full
 transcript in order (so it has context like "this is a cooking podcast")
 and emits a list of suspect spans with suggested replacements + confidence.
 
@@ -11,15 +11,14 @@ applies accepted corrections to the draft markdown.
 
 from __future__ import annotations
 
-import json
-import re
-import shutil
-import subprocess
+import hashlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from loguru import logger
+from pydantic import BaseModel, Field
 
+from .llm import run_structured
 from .types import Chunk
 
 
@@ -36,31 +35,39 @@ class WordFlag:
         return asdict(self)
 
 
-_JSON_ARRAY_RE = re.compile(r"\[\s*{.*?}\s*]|\[\s*]", re.DOTALL)
+class _Flag(BaseModel):
+    chunk_id: int
+    original: str = Field(description="Exact span as it appears in the chunk, including capitalization and spacing.")
+    suggested: str = Field(description="Single best correction.")
+    alternatives: list[str] = Field(default_factory=list, max_length=3, description="Other plausible options.")
+    confidence: int = Field(ge=0, le=100, description="How sure you are this is a TRANSCRIPTION ERROR.")
+    reason: str = Field(default="", description="≤20 words pointing at the specific contextual signal.")
+
+
+class _Flags(BaseModel):
+    flags: list[_Flag] = Field(description="One entry per suspected error; empty if none.")
 
 
 def flag_asr_errors(
     chunks: list[Chunk],
+    model: str,
     context_hint: str | None = None,
-    claude_cwd: Path | None = None,
     source_audio: Path | None = None,
 ) -> list[WordFlag]:
-    """Ask Claude to find likely Whisper transcription errors. Returns [] on failure."""
-    # Cache keyed on original audio path so iterations skip the ~30-60s Claude call.
-    if source_audio is not None:
-        from .cache import load_asr_flags, save_asr_flags
-
-        cached = load_asr_flags(source_audio)
-        if cached is not None:
-            return cached
-
-    if shutil.which("claude") is None:
-        logger.warning("`claude` CLI missing; skipping ASR correction pass.")
-        return []
+    """Ask the LLM to find likely Whisper transcription errors. Returns [] on failure."""
     if not chunks:
         return []
 
     numbered = "\n".join(f"[{c.idx}] {c.text}" for c in chunks)
+    transcript_digest = hashlib.sha256(numbered.encode()).hexdigest()[:16]
+
+    # Cache keyed on audio + model + exact chunk listing so iterations skip the ~30-60s LLM call.
+    if source_audio is not None:
+        from .cache import load_asr_flags
+
+        cached = load_asr_flags(source_audio, model, transcript_digest)
+        if cached is not None:
+            return cached
     context_line = (
         f"Context: {context_hint.strip()}"
         if context_hint
@@ -76,98 +83,52 @@ Your job: spot words/phrases that don't fit the context — sound-alike mistakes
 substitutions. Ignore correct-but-unusual proper nouns, rare jargon, or stylistic
 choices. When in doubt, don't flag.
 
-Output STRICT JSON — a single array, one object per flag (empty array if none):
-  [{{"chunk_id": 42, "original": "B2B sauce", "suggested": "B2B SaaS",
-    "alternatives": ["software as a service"], "confidence": 92,
-    "reason": "discussion of software business models; 'sauce' doesn't fit"}}]
+Example flag:
+  chunk_id=42, original="B2B sauce", suggested="B2B SaaS",
+  alternatives=["software as a service"], confidence=92,
+  reason="discussion of software business models; 'sauce' doesn't fit"
 
 Rules:
-- 'original' must be the exact span as it appears in the chunk, including
-  capitalization and spacing. You may span multi-word phrases.
-- 'suggested' is your single best correction; 'alternatives' are other
-  plausible options (0-3 items, optional).
+- 'original' must be the exact span as it appears in the chunk. You may span multi-word phrases.
+- 'alternatives' holds 0-3 other plausible options.
 - 'confidence' is 0-100 — how sure you are this is a TRANSCRIPTION ERROR
   (not a stylistic issue). Use:
     90-100 — high confidence: context clearly rules out the transcribed word
     70-89  — confident but some ambiguity
     50-69  — plausible error, borderline
     below 50 — don't flag
-- 'reason' ≤ 20 words, pointing at the specific contextual signal.
-- Output ONLY the JSON array. No preamble, no markdown fences.
 
 Chunks:
 {numbered}
 """
 
-    logger.info(
-        f"ASR correction pass via `claude -p` on {len(chunks)} chunks{f' (cwd={claude_cwd})' if claude_cwd else ''}…"
-    )
+    logger.info(f"ASR correction pass via {model} on {len(chunks)} chunks…")
     try:
-        proc = subprocess.run(
-            ["claude", "-p", "--permission-mode", "auto"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=str(claude_cwd) if claude_cwd else None,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"ASR correction claude call failed (exit {e.returncode}): {e.stderr}")
+        result = run_structured(prompt, _Flags, model)
+    except Exception as e:
+        logger.error(f"ASR correction LLM call failed ({model}): {e}")
         return []
 
-    flags = _parse_flags(proc.stdout, {c.idx for c in chunks})
+    flags = _to_word_flags(result.flags, {c.idx for c in chunks})
     if source_audio is not None:
         from .cache import save_asr_flags
 
-        save_asr_flags(source_audio, flags)
+        save_asr_flags(source_audio, model, transcript_digest, flags)
     return flags
 
 
-def _parse_flags(raw: str, valid_ids: set[int]) -> list[WordFlag]:
-    raw = raw.strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        m = _JSON_ARRAY_RE.search(raw)
-        if not m:
-            logger.error(f"ASR correction produced no parseable JSON:\n{raw[:500]}")
-            return []
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError as e:
-            logger.error(f"ASR correction JSON parse failed: {e}")
-            return []
-
-    if not isinstance(data, list):
-        return []
-
-    flags: list[WordFlag] = []
-    for entry in data:
-        if not isinstance(entry, dict):
-            continue
-        idx = entry.get("chunk_id")
-        orig = entry.get("original")
-        sugg = entry.get("suggested")
-        if not (isinstance(idx, int) and idx in valid_ids and isinstance(orig, str) and isinstance(sugg, str)):
-            continue
-        try:
-            conf = int(entry.get("confidence", 50))
-        except (TypeError, ValueError):
-            conf = 50
-        alts = entry.get("alternatives") or []
-        if not isinstance(alts, list):
-            alts = []
-        alts = [str(a) for a in alts if isinstance(a, (str, int, float))][:3]
-        flags.append(
-            WordFlag(
-                chunk_idx=idx,
-                original=orig,
-                suggested=sugg,
-                confidence=max(0, min(100, conf)),
-                reason=str(entry.get("reason", "")),
-                alternatives=alts,
-            )
+def _to_word_flags(entries: list[_Flag], valid_ids: set[int]) -> list[WordFlag]:
+    flags = [
+        WordFlag(
+            chunk_idx=f.chunk_id,
+            original=f.original,
+            suggested=f.suggested,
+            confidence=f.confidence,
+            reason=f.reason,
+            alternatives=f.alternatives,
         )
-
+        for f in entries
+        if f.chunk_id in valid_ids
+    ]
     logger.info(f"ASR correction flagged {len(flags)} span(s).")
     return flags

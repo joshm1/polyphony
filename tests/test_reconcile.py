@@ -1,15 +1,18 @@
 """Tests for the pure-logic reconciliation + transcript-rendering paths.
 
-Anything that shells out to `claude -p` is mocked at the boundary; we only
-exercise the local resolution rules, the reconciler JSON parser, and the
-LLM-paragraph round-trip validator. The real reconciler and paragraphize
+LLM calls are mocked at the `run_structured` boundary; we only exercise the
+local resolution rules, the post-validation filtering of LLM output, and the
+paragraph round-trip validator. The real reconciler and paragraphize
 behavior are integration-tested by running polyphony on real audio.
 """
 
 from __future__ import annotations
 
-from polyphony.paragraphize import _apply_breaks_to_turns, _parse_break_ids
-from polyphony.reconcile import _parse_reconciler_json, reconcile
+from polyphony.asr_correction import _Flag, _to_word_flags
+from polyphony.backends.assemblyai import Word, words_to_chunks
+from polyphony.diarize import _labels_by_chunk, _SpeakerAssignment
+from polyphony.paragraphize import _apply_breaks_to_turns, _clean_break_ids
+from polyphony.reconcile import _Decision, _Decisions, _decisions_by_chunk, reconcile
 from polyphony.transcript import _group_into_turns
 from polyphony.types import Chunk, ChunkLabel
 
@@ -20,7 +23,7 @@ def _ch(idx: int, text: str = "x") -> Chunk:
 
 def test_full_agreement_skips_reconciler():
     chunks = [_ch(0), _ch(1), _ch(2)]
-    out = reconcile(chunks, [1, 2, 1], [1, 2, 1], names=None)
+    out = reconcile(chunks, [1, 2, 1], [1, 2, 1], names=None, model="test")
     assert [lbl.final for lbl in out] == [1, 2, 1]
     assert all(lbl.confidence == 100 for lbl in out)
     assert all(lbl.note == "both backends agreed" for lbl in out)
@@ -28,83 +31,80 @@ def test_full_agreement_skips_reconciler():
 
 def test_one_silent_backend_uses_other_with_medium_confidence():
     chunks = [_ch(0), _ch(1)]
-    # pyannote silent on chunk 0; claude silent on chunk 1
-    out = reconcile(chunks, [None, 2], [1, None], names=None)
+    # audio diarizer silent on chunk 0; LLM silent on chunk 1
+    out = reconcile(chunks, [None, 2], [1, None], names=None, model="test")
     assert out[0].final == 1
     assert out[0].confidence == 70
-    assert "claude" in out[0].note
+    assert "LLM" in out[0].note
     assert out[1].final == 2
     assert out[1].confidence == 70
-    assert "pyannote" in out[1].note
+    assert "audio" in out[1].note
 
 
-def test_parse_reconciler_json_basic():
-    raw = '[{"id": 0, "speaker": 1, "confidence": 88, "reason": "asks question"}]'
-    decisions = _parse_reconciler_json(raw)
-    assert 0 in decisions
-    assert decisions[0].speaker == 1
-    assert decisions[0].confidence == 88
-    assert decisions[0].reason == "asks question"
+def test_decisions_by_chunk_drops_non_disputed_ids():
+    decisions = [
+        _Decision(id=0, speaker=1, confidence=88, reason="asks question"),
+        _Decision(id=3, speaker=2, confidence=60),
+    ]
+    out = _decisions_by_chunk(decisions, disputed={0})
+    assert list(out) == [0]
+    assert out[0].reason == "asks question"
 
 
-def test_parse_reconciler_json_tolerates_surrounding_prose():
-    raw = 'Sure, here you go:\n\n```json\n[{"id": 5, "speaker": 2, "confidence": 60}]\n```\n'
-    decisions = _parse_reconciler_json(raw)
-    assert decisions[5].speaker == 2
-    assert decisions[5].confidence == 60
+def test_reconciler_failure_falls_back_heuristically(monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("polyphony.reconcile.run_structured", boom)
+    chunks = [_ch(0), _ch(1)]
+    out = reconcile(chunks, [1, 2], [2, None], names=None, model="test")
+    assert out[0].final == 1  # audio diarizer preferred when both present
+    assert out[0].confidence == 25
+    assert out[1].confidence == 70
 
 
-def test_parse_reconciler_json_skips_malformed_entries():
-    raw = '[{"id": 0, "speaker": 1}, {"id": "bad", "speaker": 2}, {"speaker": 3}]'
-    decisions = _parse_reconciler_json(raw)
-    # Only the well-formed entry survives.
-    assert list(decisions.keys()) == [0]
+def test_reconciler_applies_llm_decisions(monkeypatch):
+    monkeypatch.setattr(
+        "polyphony.reconcile.run_structured",
+        lambda *_a, **_k: _Decisions(decisions=[_Decision(id=0, speaker=2, confidence=81, reason="answers Q")]),
+    )
+    out = reconcile([_ch(0)], [1], [2], names=None, model="test")
+    assert (out[0].final, out[0].confidence, out[0].note) == (2, 81, "answers Q")
 
 
-def test_parse_reconciler_json_returns_empty_on_garbage():
-    assert _parse_reconciler_json("not json at all") == {}
-    assert _parse_reconciler_json("") == {}
+def test_llm_labels_drop_out_of_range_entries():
+    entries = [
+        _SpeakerAssignment(id=0, speaker=1),
+        _SpeakerAssignment(id=1, speaker=5),  # beyond max_speaker
+        _SpeakerAssignment(id=9, speaker=2),  # no such chunk
+    ]
+    assert _labels_by_chunk(entries, expected_len=3, max_speaker=2) == [1, None, None]
 
 
-def test_parse_reconciler_json_defaults_bad_confidence_to_50():
-    raw = '[{"id": 0, "speaker": 1, "confidence": "very high"}]'
-    decisions = _parse_reconciler_json(raw)
-    assert decisions[0].confidence == 50
+def test_asr_flags_drop_unknown_chunks():
+    entries = [
+        _Flag(chunk_id=4, original="sauce", suggested="SaaS", confidence=92),
+        _Flag(chunk_id=99, original="x", suggested="y", confidence=90),
+    ]
+    flags = _to_word_flags(entries, valid_ids={4})
+    assert [(f.chunk_idx, f.suggested) for f in flags] == [(4, "SaaS")]
 
 
-# ---------- transcript._parse_break_ids + _apply_breaks_to_turns ----------
+# ---------- paragraphize._clean_break_ids + _apply_breaks_to_turns ----------
 
 
 def _lbl(idx: int, final: int, text: str = "x") -> ChunkLabel:
     ch = Chunk(idx=idx, start=float(idx), end=float(idx + 1), text=text)
-    return ChunkLabel(chunk=ch, pyannote=final, claude=final, final=final, confidence=100)
+    return ChunkLabel(chunk=ch, audio=final, llm=final, final=final, confidence=100)
 
 
-def test_parse_break_ids_accepts_clean_list():
-    raw = '{"break_after_chunk": [3, 7, 12]}'
-    assert _parse_break_ids(raw, valid_ids={3, 7, 12, 99}) == [3, 7, 12]
+def test_clean_break_ids_filters_dedupes_and_sorts():
+    assert _clean_break_ids([7, 3, 999, 7, -1, 12], valid_ids={3, 7, 12}) == [3, 7, 12]
 
 
-def test_parse_break_ids_filters_out_of_range():
-    raw = '{"break_after_chunk": [3, 999, 12, -1]}'
-    assert _parse_break_ids(raw, valid_ids={3, 12}) == [3, 12]
-
-
-def test_parse_break_ids_dedupes_and_sorts():
-    raw = '{"break_after_chunk": [7, 3, 7, 12, 3]}'
-    assert _parse_break_ids(raw, valid_ids={3, 7, 12}) == [3, 7, 12]
-
-
-def test_parse_break_ids_returns_empty_list_for_no_breaks():
+def test_clean_break_ids_allows_no_breaks():
     # Valid output meaning "nothing needs breaking" — not a failure.
-    raw = '{"break_after_chunk": []}'
-    assert _parse_break_ids(raw, valid_ids={0, 1}) == []
-
-
-def test_parse_break_ids_rejects_wrong_shape():
-    assert _parse_break_ids("[3, 7]", valid_ids={3, 7}) is None
-    assert _parse_break_ids('{"foo": [3]}', valid_ids={3}) is None
-    assert _parse_break_ids("not json", valid_ids={3}) is None
+    assert _clean_break_ids([], valid_ids={0, 1}) == []
 
 
 # Paragraphs here are long enough (~140c each) not to trip the stranded-tail
@@ -186,3 +186,35 @@ def test_polish_leaves_oversized_without_marker_alone():
     turns = _group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [])
     assert paras == [[text]]
+
+
+# ---------- backends.assemblyai.words_to_chunks ----------
+
+
+def _w(text: str, speaker: str, t: float) -> Word:
+    return Word(text=text, start=t, end=t + 0.5, speaker=speaker)
+
+
+def test_words_to_chunks_splits_on_sentence_end_and_speaker_change():
+    words = [
+        _w("Hi", "B", 0), _w("there.", "B", 1), _w("How", "B", 2), _w("are", "B", 3),
+        _w("Good", "A", 4), _w("thanks!", "A", 5),
+    ]  # fmt: skip
+    chunks, labels = words_to_chunks(words)
+    assert [c.text for c in chunks] == ["Hi there.", "How are", "Good thanks!"]
+    # Speaker ids follow first appearance, not AssemblyAI's letters.
+    assert labels == [1, 1, 2]
+    assert [c.idx for c in chunks] == [0, 1, 2]
+    assert (chunks[1].start, chunks[1].end) == (2, 3.5)
+
+
+# ---------- backends.resolve_backend ----------
+
+
+def test_auto_prefers_assemblyai_when_key_set(monkeypatch):
+    from polyphony.backends import resolve_backend
+
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "k")
+    assert resolve_backend("auto").name == "assemblyai"
+    monkeypatch.delenv("ASSEMBLYAI_API_KEY")
+    assert resolve_backend("auto").name == "gemini"

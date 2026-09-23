@@ -1,39 +1,29 @@
-"""Ask Gemini to pick paragraph-break points inside speaker turns.
+"""Ask the LLM to pick paragraph-break points inside speaker turns.
 
 Design:
-- One Gemini call per transcribe. We ship a chunk-per-line input with
-  anonymous speaker letters (A/B/…) and ask for a JSON list of chunk IDs
-  to break after. Structured output (`response_schema`) guarantees the
-  shape, so there's no parsing drift to handle.
-- Round-trip safe by construction: Gemini never re-emits text, it only
+- One LLM call per transcribe. We ship a chunk-per-line input with
+  anonymous speaker letters (A/B/…) and ask for the chunk IDs to break
+  after. Structured output guarantees the shape, so there's no parsing
+  drift to handle.
+- Round-trip safe by construction: the LLM never re-emits text, it only
   picks break points. We slice chunks into paragraphs on our side.
 - Two post-process passes clean up what the LLM is unreliable about:
   short trailing fragments get merged back into their setup (punchlines
   belong with the thought they resolve), and oversized paragraphs get
   split at the nearest discourse marker.
-
-Routing: uses $GEMINI_API_KEY / $GOOGLE_API_KEY if present, else falls back
-to Vertex via ADC + $GOOGLE_CLOUD_PROJECT. If neither is configured (or the
-API call itself errors) the caller falls back to one-paragraph-per-turn —
-the legacy wall-of-text shape.
 """
 
 from __future__ import annotations
 
-import json
-import os
+import hashlib
 from pathlib import Path
 
 from loguru import logger
+from pydantic import BaseModel, Field
 
+from .llm import run_structured
 from .transcript import _group_into_turns, _Turn
 from .types import ChunkLabel
-
-# `global` has the widest model availability — the flash-lite preview lives
-# there but not in regional endpoints. Override via $GOOGLE_CLOUD_LOCATION
-# if you need in-region traffic.
-PARAGRAPHIZE_MODEL = os.environ.get("POLYPHONY_PARAGRAPHIZE_MODEL", "gemini-3.1-flash-lite-preview")
-PARAGRAPHIZE_LOCATION_DEFAULT = "global"
 
 _STRANDED_TAIL_MAX_CHARS = 120
 _OVERSIZED_PARAGRAPH_MIN_CHARS = 1000
@@ -57,95 +47,54 @@ _DISCOURSE_MARKERS = (
 )
 
 
-def paragraphize_via_gemini(
-    labels: list[ChunkLabel],
-    names: list[str] | None,
-    context_hint: str | None = None,
-    project: str | None = None,
-    location: str | None = None,
-    source_audio: Path | None = None,
-) -> list[list[str]] | None:
-    """Ask Gemini to pick paragraph-break points.
+class _Breaks(BaseModel):
+    break_after_chunk: list[int] = Field(description="Sorted chunk ids to break after. Empty list is valid.")
 
-    Returns a list aligned with `_group_into_turns`; each inner list is
-    the paragraphs for that turn. Returns None on any failure (no Gemini
-    credentials configured, API error, malformed response). Callers pass
-    the result straight to `build_transcript`; if None, the markdown
-    falls back to one-paragraph-per-turn.
+
+def paragraphize(
+    labels: list[ChunkLabel],
+    model: str,
+    context_hint: str | None = None,
+    source_audio: Path | None = None,
+) -> list[int] | None:
+    """Ask the LLM to pick paragraph-break points.
+
+    Returns the sorted chunk ids to break after — stored in the sidecar so a
+    review can re-render after speaker overrides without another LLM call.
+    Turn them into paragraphs with `paragraphs_for`. Returns None on any
+    failure; the markdown then falls back to one-paragraph-per-turn.
     """
-    turns = _group_into_turns(labels, review_threshold=100)
-    if not turns:
+    if not labels:
         return []
 
+    prompt = _build_prompt(labels, context_hint)
+    prompt_digest = hashlib.sha256(prompt.encode()).hexdigest()[:16]
     if source_audio is not None:
-        from .cache import load_paragraphs
+        from .cache import load_paragraph_breaks
 
-        cached = load_paragraphs(source_audio, len(turns))
+        cached = load_paragraph_breaks(source_audio, model, prompt_digest)
         if cached is not None:
             return cached
 
+    logger.info(f"Paragraphizing {len(labels)} chunks via {model}…")
     try:
-        from google.genai import types
-    except ImportError as e:
-        logger.warning(f"google-genai not installed ({e}); skipping paragraphize pass.")
-        return None
-
-    from .gemini_client import make_gemini_client
-
-    try:
-        info = make_gemini_client(project, location, PARAGRAPHIZE_LOCATION_DEFAULT)
-    except RuntimeError as e:
-        logger.warning(f"{e}; skipping paragraphize pass.")
-        return None
-
-    prompt = _build_prompt(labels, context_hint)
-    valid_ids = {lbl.chunk.idx for lbl in labels}
-    schema = {
-        "type": "object",
-        "properties": {
-            "break_after_chunk": {
-                "type": "array",
-                "items": {"type": "integer"},
-            }
-        },
-        "required": ["break_after_chunk"],
-    }
-    config = types.GenerateContentConfig(
-        temperature=0,
-        response_mime_type="application/json",
-        response_schema=schema,
-        # Gemini 2.5+ Flash burns thinking tokens against max_output_tokens
-        # before emitting the visible response, so we need significant
-        # headroom even though the JSON we actually want is <1KB.
-        max_output_tokens=32768,
-    )
-
-    logger.info(
-        f"Paragraphizing {len(labels)} chunks / {len(turns)} turns in one Gemini call "
-        f"({PARAGRAPHIZE_MODEL}, via {info.describe()})…"
-    )
-    try:
-        response = info.client.models.generate_content(
-            model=PARAGRAPHIZE_MODEL,
-            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-            config=config,
-        )
+        result = run_structured(prompt, _Breaks, model)
     except Exception as e:
-        logger.error(f"Paragraphize Gemini call failed: {e}")
+        logger.error(f"Paragraphize LLM call failed ({model}): {e}")
         return None
 
-    break_ids = _parse_break_ids(response.text or "", valid_ids)
-    if break_ids is None:
-        return None
-
-    result = _apply_breaks_to_turns(turns, break_ids)
-    logger.info(f"Paragraphize: {len(result)} turn(s) split into {sum(len(p) for p in result)} paragraph(s).")
-
+    break_ids = _clean_break_ids(result.break_after_chunk, {lbl.chunk.idx for lbl in labels})
+    logger.info(f"Paragraphize: {len(break_ids)} break(s) chosen.")
     if source_audio is not None:
-        from .cache import save_paragraphs
+        from .cache import save_paragraph_breaks
 
-        save_paragraphs(source_audio, result)
-    return result
+        save_paragraph_breaks(source_audio, model, prompt_digest, break_ids)
+    return break_ids
+
+
+def paragraphs_for(labels: list[ChunkLabel], break_ids: list[int]) -> list[list[str]]:
+    """Per-turn paragraphs (aligned with `_group_into_turns`) for `build_transcript`."""
+    return _apply_breaks_to_turns(_group_into_turns(labels, review_threshold=100), break_ids)
 
 
 # ---------- prompt ----------
@@ -204,47 +153,21 @@ IMPORTANT NUANCES:
   No single paragraph should run past ~1000 chars if a reasonable
   break point exists.
 
-Return a JSON object with a single key `break_after_chunk` whose value
-is the sorted list of chunk_ids to break after. Empty list is valid.
+Return the sorted list of chunk_ids to break after. Empty list is valid.
 
 TRANSCRIPT:
 {transcript}
 """
 
 
-# ---------- parsing ----------
+# ---------- validation ----------
 
 
-def _parse_break_ids(raw: str, valid_ids: set[int]) -> list[int] | None:
-    raw = (raw or "").strip()
-    if not raw:
-        logger.error("Paragraphize returned empty response.")
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.error(f"Paragraphize JSON parse failed: {e}; raw: {raw[:500]}")
-        return None
-
-    if not isinstance(data, dict):
-        logger.error(f"Paragraphize result was not a JSON object (got {type(data).__name__}).")
-        return None
-
-    raw_ids = data.get("break_after_chunk")
-    if not isinstance(raw_ids, list):
-        logger.error("Paragraphize result had no 'break_after_chunk' list.")
-        return None
-
-    clean: list[int] = []
-    skipped = 0
-    for v in raw_ids:
-        if isinstance(v, int) and v in valid_ids:
-            clean.append(v)
-        else:
-            skipped += 1
-    if skipped:
-        logger.info(f"Paragraphize ignored {skipped} out-of-range or malformed break id(s).")
-    return sorted(set(clean))
+def _clean_break_ids(raw_ids: list[int], valid_ids: set[int]) -> list[int]:
+    clean = sorted({i for i in raw_ids if i in valid_ids})
+    if skipped := len(raw_ids) - sum(1 for i in raw_ids if i in valid_ids):
+        logger.info(f"Paragraphize ignored {skipped} out-of-range break id(s).")
+    return clean
 
 
 # ---------- apply + polish ----------

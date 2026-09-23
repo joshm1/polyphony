@@ -19,6 +19,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "assemblyai>=0.40",
     "click>=8.1",
     "fastapi>=0.135.3",
     "google-genai>=0.8",
@@ -26,6 +27,7 @@ dependencies = [
     "loguru>=0.7",
     "numpy>=1.26",
     "pyannote-audio>=3.1",
+    "pydantic-ai-slim[openai]>=2.48",
     "soundfile>=0.12",
     "torch>=2.2",
     "torchaudio>=2.2",

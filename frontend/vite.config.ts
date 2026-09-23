@@ -26,6 +26,8 @@ export default defineConfig({
     // deployed playground without re-installing Node.
     sourcemap: true,
     minify: true,
+    // The CSS is small; keep it readable so committed-bundle diffs are reviewable.
+    cssMinify: false,
     target: "es2020",
   },
   server: {

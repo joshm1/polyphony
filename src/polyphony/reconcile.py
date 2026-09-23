@@ -1,52 +1,47 @@
 """Ensemble reconciliation of two diarizations, with per-chunk 0-100 confidence.
 
-Given pyannote-labels and claude-labels per chunk, produce a final label
-per chunk plus a 0-100 confidence score. For chunks where the two backends
-already agree, confidence is 100 and we skip the reconciler. For the rest,
-we ask `claude -p` to choose, giving it full surrounding context + both
+Given audio-diarizer labels (pyannote / AssemblyAI) and LLM labels per
+chunk, produce a final label per chunk plus a 0-100 confidence score. For
+chunks where the two already agree, confidence is 100 and we skip the
+reconciler. For the rest, we ask the LLM to choose, giving it full surrounding context + both
 candidate labels, and have it emit a confidence score based on how clear
 the evidence was.
 """
 
 from __future__ import annotations
 
-import json
-import re
-import shutil
-import subprocess
-from dataclasses import dataclass
-from pathlib import Path
-
 from loguru import logger
+from pydantic import BaseModel, Field
 
+from .llm import run_structured
 from .types import Chunk, ChunkLabel
 
 
 def reconcile(
     chunks: list[Chunk],
-    pyannote: list[int | None],
-    claude: list[int | None],
+    audio: list[int | None],
+    llm: list[int | None],
     names: list[str] | None,
-    claude_cwd: Path | None = None,
+    model: str,
 ) -> list[ChunkLabel]:
     """Merge two candidate diarizations into one with per-chunk confidence."""
-    assert len(chunks) == len(pyannote) == len(claude), "label arrays must align with chunks"
+    assert len(chunks) == len(audio) == len(llm), "label arrays must align with chunks"
 
     # Trivial cases resolved locally; reconciler only sees real disagreements.
     labels: list[ChunkLabel | None] = [None] * len(chunks)
     disputed: list[int] = []  # chunk indexes needing the reconciler
 
     for i, ch in enumerate(chunks):
-        p, c = pyannote[i], claude[i]
+        p, c = audio[i], llm[i]
         if p is not None and c is not None and p == c:
             labels[i] = ChunkLabel(ch, p, c, final=p, confidence=100, note="both backends agreed")
         elif p is None and c is None:
             # Nobody had a view — default to speaker 1 with low confidence; reconciler can adjust.
             disputed.append(i)
         elif p is None:
-            labels[i] = ChunkLabel(ch, None, c, final=c, confidence=70, note="pyannote silent; used claude")
+            labels[i] = ChunkLabel(ch, None, c, final=c, confidence=70, note="audio diarizer silent; used LLM")
         elif c is None:
-            labels[i] = ChunkLabel(ch, p, None, final=p, confidence=70, note="claude silent; used pyannote")
+            labels[i] = ChunkLabel(ch, p, None, final=p, confidence=70, note="LLM silent; used audio diarizer")
         else:
             disputed.append(i)
 
@@ -55,14 +50,14 @@ def reconcile(
         return [lbl for lbl in labels if lbl is not None]  # type: ignore[misc]
 
     logger.info(f"Reconciler needed for {len(disputed)}/{len(chunks)} chunks.")
-    decisions = _run_reconciler(chunks, pyannote, claude, names, disputed, claude_cwd)
+    decisions = _run_reconciler(chunks, audio, llm, names, disputed, model)
 
     for i in disputed:
         ch = chunks[i]
-        p, c = pyannote[i], claude[i]
+        p, c = audio[i], llm[i]
         dec = decisions.get(i)
         if dec is None:
-            # Fallback: prefer pyannote when both present, else whichever isn't None, else 1.
+            # Fallback: prefer the audio diarizer when both present, else whichever isn't None, else 1.
             final = p if p is not None else c if c is not None else 1
             labels[i] = ChunkLabel(
                 ch,
@@ -78,71 +73,62 @@ def reconcile(
                 p,
                 c,
                 final=dec.speaker,
-                confidence=max(0, min(100, dec.confidence)),
+                confidence=dec.confidence,
                 note=dec.reason or "",
             )
 
     return [lbl for lbl in labels if lbl is not None]  # type: ignore[misc]
 
 
-@dataclass
-class _Decision:
-    speaker: int
-    confidence: int
-    reason: str
+class _Decision(BaseModel):
+    id: int = Field(description="DISPUTED chunk id, exactly as shown in brackets.")
+    speaker: int = Field(ge=1, description="1-indexed speaker id.")
+    confidence: int = Field(ge=0, le=100)
+    reason: str = Field(default="", description="≤15 words pointing at the specific signal.")
 
 
-_JSON_ARRAY_RE = re.compile(r"\[\s*{.*?}\s*]", re.DOTALL)
+class _Decisions(BaseModel):
+    decisions: list[_Decision] = Field(description="One entry per DISPUTED chunk id.")
 
 
 def _run_reconciler(
     chunks: list[Chunk],
-    pyannote: list[int | None],
-    claude: list[int | None],
+    audio: list[int | None],
+    llm: list[int | None],
     names: list[str] | None,
     disputed: list[int],
-    claude_cwd: Path | None = None,
+    model: str,
 ) -> dict[int, _Decision]:
-    if shutil.which("claude") is None:
-        logger.warning("`claude` CLI missing; reconciler disabled, disputes fall back heuristically.")
-        return {}
-
-    speaker_lines = []
     if names:
-        for i, name in enumerate(names, start=1):
-            speaker_lines.append(f"  Speaker {i} = {name}")
+        speaker_block = "\n".join(f"  Speaker {i} = {name}" for i, name in enumerate(names, start=1))
     else:
-        speaker_lines.append("  Speakers are unnamed — use 1-indexed ids.")
-    speaker_block = "\n".join(speaker_lines)
+        speaker_block = "  Speakers are unnamed — use 1-indexed ids."
 
     # Present the whole transcript so the reconciler has full context —
     # surrounding agreed turns are the strongest signal for the disputes.
     lines: list[str] = []
     disputed_set = set(disputed)
     for i, ch in enumerate(chunks):
-        p, c = pyannote[i], claude[i]
+        p, c = audio[i], llm[i]
         if i in disputed_set:
-            marker = f"DISPUTED py={p} cl={c}"
+            marker = f"DISPUTED audio={p} llm={c}"
         else:
             agreed = p if p == c else p or c
             marker = f"agreed={agreed}" if agreed is not None else "agreed=?"
-        lines.append(f"[{i:04d} {marker}] {ch.text}")
+        lines.append(f"[{i} {marker}] {ch.text}")
     full_listing = "\n".join(lines)
 
     prompt = f"""You are the tie-breaker in an ensemble diarization of a Whisper ASR transcript.
 
 Two backends labeled each chunk:
-  - pyannote (audio-based voice fingerprinting, good at voice changes)
-  - claude   (text-based reasoning, good at role cues and semantics)
+  - audio = voice-based diarization (good at voice changes)
+  - llm   = text-based reasoning (good at role cues and semantics)
 
 They agreed on most chunks. Your job: for each DISPUTED chunk, pick the correct
 speaker id using surrounding context, and rate your own confidence 0-100.
 
 Speakers:
 {speaker_block}
-
-Strict output: a JSON array, one entry per DISPUTED chunk id, in any order:
-  [{{"id": 0042, "speaker": 1, "confidence": 85, "reason": "answers the question asked in the previous chunk"}}, ...]
 
 Confidence rubric (be honest — low confidence triggers human review):
   100 — only used for agreed chunks (not your job)
@@ -151,63 +137,19 @@ Confidence rubric (be honest — low confidence triggers human review):
   40-59 — genuinely unclear; coin flip with weak evidence
   0-39  — no real evidence; guessing
 
-Rules:
-- Reasoning in 'reason' should be short (≤15 words) and point at the specific signal.
-- Output ONLY the JSON array. No preamble, no markdown fences.
-
 Full transcript (ALL chunks, with agreed labels as context and DISPUTED chunks to resolve):
 {full_listing}
 """
 
-    logger.info(
-        f"Running reconciler via `claude -p` on {len(disputed)} disputes{f' (cwd={claude_cwd})' if claude_cwd else ''}…"
-    )
+    logger.info(f"Running reconciler via {model} on {len(disputed)} disputes…")
     try:
-        proc = subprocess.run(
-            ["claude", "-p", "--permission-mode", "auto"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=str(claude_cwd) if claude_cwd else None,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Reconciler claude call failed (exit {e.returncode}): {e.stderr}")
+        result = run_structured(prompt, _Decisions, model)
+    except Exception as e:
+        logger.error(f"Reconciler LLM call failed ({model}): {e}")
         return {}
+    return _decisions_by_chunk(result.decisions, disputed_set)
 
-    return _parse_reconciler_json(proc.stdout)
 
-
-def _parse_reconciler_json(raw: str) -> dict[int, _Decision]:
-    raw = raw.strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        m = _JSON_ARRAY_RE.search(raw)
-        if not m:
-            logger.error(f"Reconciler produced no parseable JSON:\n{raw[:500]}")
-            return {}
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError as e:
-            logger.error(f"Reconciler JSON parse failed: {e}")
-            return {}
-
-    if not isinstance(data, list):
-        return {}
-
-    out: dict[int, _Decision] = {}
-    for entry in data:
-        if not isinstance(entry, dict):
-            continue
-        idx = entry.get("id")
-        spk = entry.get("speaker")
-        conf = entry.get("confidence", 50)
-        reason = entry.get("reason", "")
-        if isinstance(idx, int) and isinstance(spk, int) and spk >= 1:
-            try:
-                conf_int = int(conf)
-            except (TypeError, ValueError):
-                conf_int = 50
-            out[idx] = _Decision(speaker=spk, confidence=conf_int, reason=str(reason))
-    return out
+def _decisions_by_chunk(decisions: list[_Decision], disputed: set[int]) -> dict[int, _Decision]:
+    # Answers for non-disputed chunks would silently override agreed labels' notes; drop them.
+    return {d.id: d for d in decisions if d.id in disputed}

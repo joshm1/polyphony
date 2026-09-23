@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type {
+  ApplyResult,
   Chunk,
   PolyphonyData,
   PopoverState,
@@ -40,14 +41,23 @@ export default function App({ data }: AppProps) {
   const [flags, setFlags] = useState<WordFlag[]>([...(data.asr_flags ?? [])]);
   const [mode, setMode] = useState<"speakers" | "words">("speakers");
   const [threshold, setThreshold] = useState<number>(100);
-  const [overrides, setOverrides] = useState<Map<number, number>>(new Map());
-  const [wordDecisions, setWordDecisions] = useState<Map<number, WordDecision>>(new Map());
+  // Hydrated from the sidecar so a reload resumes the last applied review.
+  const [overrides, setOverrides] = useState<Map<number, number>>(
+    () => new Map(Object.entries(data.review?.overrides ?? {}).map(([k, v]) => [Number(k), v])),
+  );
+  const [wordDecisions, setWordDecisions] = useState<Map<number, WordDecision>>(
+    () =>
+      new Map(Object.entries(data.review?.word_decisions ?? {}).map(([k, v]) => [Number(k), v])),
+  );
   const [focusedWordIdx, setFocusedWordIdx] = useState<number>(flags.length > 0 ? 0 : -1);
   const [playingChunkIdx, setPlayingChunkIdx] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [copyStatus, setCopyStatus] = useState(false);
+  const [applyStatus, setApplyStatus] = useState<
+    { kind: "idle" } | { kind: "busy" } | { kind: "done" | "error"; message: string }
+  >({ kind: "idle" });
   const [popover, setPopover] = useState<PopoverState>({
     open: false,
     chunkIdx: null,
@@ -489,6 +499,29 @@ export default function App({ data }: AppProps) {
     window.setTimeout(() => setCopyStatus(false), 1500);
   }, [buildApplyPrompt]);
 
+  const applyReview = useCallback(async () => {
+    setApplyStatus({ kind: "busy" });
+    try {
+      const r = await fetch("/api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          overrides: Object.fromEntries(overrides),
+          asr_flags: flags,
+          word_decisions: Object.fromEntries(wordDecisions),
+        }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+      const result = (await r.json()) as ApplyResult;
+      const skipped = result.skipped.length
+        ? ` · ${result.skipped.length} correction${result.skipped.length === 1 ? "" : "s"} not found`
+        : "";
+      setApplyStatus({ kind: "done", message: `Wrote ${result.reviewed_path}${skipped}` });
+    } catch (e: unknown) {
+      setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [overrides, flags, wordDecisions]);
+
   // ---------- keyhint bar ----------
 
   const keyhint = useMemo<string[]>(() => {
@@ -521,6 +554,29 @@ export default function App({ data }: AppProps) {
     flags.length === 0
       ? ""
       : `${focusedWordIdx + 1}/${flags.length} · ${decidedWordCount} custom decision${decidedWordCount === 1 ? "" : "s"}`;
+
+  const actions = (
+    <>
+      <button
+        type="button"
+        className="primary"
+        onClick={applyReview}
+        disabled={applyStatus.kind === "busy"}
+        title="Write the reviewed transcript next to the raw one (raw is never modified)"
+      >
+        {applyStatus.kind === "busy" ? "Applying…" : "Apply"}
+      </button>
+      <button type="button" className="secondary" onClick={copyApplyPrompt}>
+        Copy apply prompt
+      </button>
+      <span className={`copy-status${copyStatus ? " visible" : ""}`}>Copied!</span>
+      {(applyStatus.kind === "done" || applyStatus.kind === "error") && (
+        <span className={`apply-status ${applyStatus.kind}`} title={applyStatus.message}>
+          {applyStatus.message}
+        </span>
+      )}
+    </>
+  );
 
   // ---------- render ----------
 
@@ -569,18 +625,12 @@ export default function App({ data }: AppProps) {
               <span className="threshold-value">{threshold}</span>
             </div>
             <div className="stats">{statsSpeakers}</div>
-            <button type="button" className="primary" onClick={copyApplyPrompt}>
-              Copy apply prompt
-            </button>
-            <span className={`copy-status${copyStatus ? " visible" : ""}`}>Copied!</span>
+            {actions}
           </div>
         ) : (
           <div className="controls">
             <div className="stats">{statsWords}</div>
-            <button type="button" className="primary" onClick={copyApplyPrompt}>
-              Copy apply prompt
-            </button>
-            <span className={`copy-status${copyStatus ? " visible" : ""}`}>Copied!</span>
+            {actions}
           </div>
         )}
       </header>
@@ -660,9 +710,9 @@ export default function App({ data }: AppProps) {
                       </div>
                       <div className="meta">
                         <span
-                          className={`candidates${ch.pyannote != null && ch.claude != null && ch.pyannote !== ch.claude ? " disagree" : ""}`}
+                          className={`candidates${ch.audio != null && ch.llm != null && ch.audio !== ch.llm ? " disagree" : ""}`}
                         >
-                          py={ch.pyannote ?? "∅"} cl={ch.claude ?? "∅"} → {ch.final} (conf{" "}
+                          audio={ch.audio ?? "∅"} llm={ch.llm ?? "∅"} → {ch.final} (conf{" "}
                           {ch.confidence})
                         </span>
                         {ch.note && <span className="note">· {ch.note}</span>}

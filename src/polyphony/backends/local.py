@@ -1,9 +1,9 @@
-"""Local ensemble backend: Whisper + pyannote + Claude diarize + reconciler.
+"""Local ensemble backend: Whisper + pyannote + LLM diarize + reconciler.
 
 This is the strongest-correctness path — two independent diarization signals
-(audio-based pyannote, text-based Claude) reconciled by a third Claude pass
-that emits per-chunk confidence. No external API for transcription or
-diarization; only Claude CLI calls.
+(audio-based pyannote, text-based LLM) reconciled by a third LLM pass that
+emits per-chunk confidence. Audio never leaves the machine; only transcript
+text goes to the LLM.
 
 Tradeoff: slow. Whisper on MPS ≈ 11 min for 1h audio; pyannote on CPU ≈ 30 min.
 Cached on disk so iteration is fast after the first pass.
@@ -19,10 +19,11 @@ from loguru import logger
 from ..audio import convert_to_wav, pick_device
 from ..diarize import (
     PyannoteUnavailable,
-    diarize_claude,
+    diarize_llm,
     diarize_pyannote,
     preflight_pyannote,
 )
+from ..llm import LLMUnavailable, check_llm
 from ..reconcile import reconcile
 from ..types import ChunkLabel
 from ..whisper import transcribe
@@ -36,6 +37,10 @@ class LocalEnsembleBackend(Backend):
         try:
             preflight_pyannote()
         except PyannoteUnavailable as e:
+            raise BackendUnavailable(str(e)) from e
+        try:
+            check_llm(cfg.llm_model)
+        except LLMUnavailable as e:
             raise BackendUnavailable(str(e)) from e
 
     def run(self, audio_path: Path, cfg: BackendConfig) -> list[ChunkLabel]:
@@ -55,16 +60,12 @@ class LocalEnsembleBackend(Backend):
                 device_str,
                 source_audio=audio_path,
             )
-            claude_labels = diarize_claude(
-                chunks,
-                cfg.names,
-                claude_cwd=cfg.claude_cwd,
-            )
+            llm_labels = diarize_llm(chunks, cfg.names, cfg.llm_model)
 
         return reconcile(
             chunks,
             pyannote_labels,
-            claude_labels,
+            llm_labels,
             cfg.names,
-            claude_cwd=cfg.claude_cwd,
+            model=cfg.llm_model,
         )

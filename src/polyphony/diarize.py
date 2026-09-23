@@ -2,7 +2,7 @@
 
 Both backends return `list[int | None]` of the same length as the Whisper
 chunks, where `int` is a 1-indexed speaker id and `None` means "this backend
-couldn't label this chunk" (e.g. pyannote saw silence, or claude omitted it).
+couldn't label this chunk" (e.g. pyannote saw silence, or the LLM omitted it).
 
 Per-chunk alignment is the key design choice: it makes the two backends
 directly comparable without fuzzy text matching in the reconciler.
@@ -10,16 +10,14 @@ directly comparable without fuzzy text matching in the reconciler.
 
 from __future__ import annotations
 
-import json
 import os
-import re
-import shutil
-import subprocess
 from pathlib import Path
 
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from .cache import load_pyannote, save_pyannote
+from .llm import run_structured
 from .types import Chunk, PyannoteSegment
 
 PYANNOTE_MODEL_ID = "pyannote/speaker-diarization-3.1"
@@ -178,56 +176,50 @@ def diarize_pyannote(
     return pyannote_per_chunk_labels(chunks, segments)
 
 
-# ---------------- claude (via claude -p + /transcript-diarize skill) ----------------
-
-_JSON_ARRAY_RE = re.compile(r"\[\s*{.*?}\s*]", re.DOTALL)
+# ---------------- LLM (text-side reasoning) ----------------
 
 
-def diarize_claude(
+class _SpeakerAssignment(BaseModel):
+    id: int = Field(description="Chunk id, exactly as shown in brackets.")
+    speaker: int = Field(ge=1, description="1-indexed speaker id.")
+
+
+class _SpeakerAssignments(BaseModel):
+    labels: list[_SpeakerAssignment] = Field(description="Exactly one entry per chunk id.")
+
+
+def diarize_llm(
     chunks: list[Chunk],
     names: list[str] | None,
+    model: str,
     expected_speakers: int = 2,
-    claude_cwd: Path | None = None,
 ) -> list[int | None]:
-    """Shell out to `claude -p` and ask it to label each chunk by speaker.
+    """Ask the LLM to label each chunk by speaker from the text alone.
 
-    Asks for strict JSON output so we can align back to chunks exactly,
-    with no fuzzy text matching.
+    Output is keyed by chunk id so it aligns back to chunks exactly, with no
+    fuzzy text matching. Any failure yields all-None, which the reconciler
+    treats as "text side silent" and falls back to pyannote.
     """
-    if shutil.which("claude") is None:
-        raise RuntimeError(
-            "`claude` CLI not found on PATH. Install Claude Code or switch to --diarize pyannote / --diarize none."
-        )
-
     if not chunks:
         return []
 
-    speaker_block_lines = []
     if names:
-        for i, name in enumerate(names, start=1):
-            speaker_block_lines.append(f"  Speaker {i} = {name}")
+        speaker_block = "\n".join(f"  Speaker {i} = {name}" for i, name in enumerate(names, start=1))
     else:
-        for i in range(1, expected_speakers + 1):
-            speaker_block_lines.append(f"  Speaker {i} (unknown name)")
-    speaker_block = "\n".join(speaker_block_lines)
-
+        speaker_block = "\n".join(f"  Speaker {i} (unknown name)" for i in range(1, expected_speakers + 1))
+    max_speaker = max(2, len(names) if names else expected_speakers)
     numbered = "\n".join(f"[{c.idx}] {c.text}" for c in chunks)
 
-    prompt = f"""Use the /transcript-diarize skill (from the audio-transcripts plugin in the
-joshm1 Claude marketplace) to label each chunk of the Whisper ASR output below with a speaker.
+    prompt = f"""Label each chunk of the Whisper ASR transcript below with its speaker.
 
 Speakers (use 1-indexed ids in your output):
 {speaker_block}
 
-Output STRICT JSON — a single array with one object per chunk, in the same order:
-  [{{"id": 0, "speaker": 1}}, {{"id": 1, "speaker": 2}}, ...]
-
 Rules:
 - Exactly one entry per chunk id.
-- Valid speaker values are 1..{max(2, len(names) if names else expected_speakers)}.
-- Output ONLY the JSON. No preamble, no commentary, no markdown fences.
+- Valid speaker values are 1..{max_speaker}.
 
-Heuristics the skill should apply:
+Heuristics:
 - The person asking questions and the person answering them are usually different speakers.
 - Very short chunks ("yeah", "right", "mm-hm") are usually reactions — often the
   opposite speaker of the previous long turn.
@@ -238,57 +230,22 @@ Chunks:
 {numbered}
 """
 
-    logger.info(
-        f"Claude diarization on {len(chunks)} chunks via `claude -p`{f' (cwd={claude_cwd})' if claude_cwd else ''}…"
-    )
+    logger.info(f"LLM diarization on {len(chunks)} chunks via {model}…")
     try:
-        proc = subprocess.run(
-            ["claude", "-p", "--permission-mode", "auto"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=str(claude_cwd) if claude_cwd else None,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"claude CLI failed (exit {e.returncode}): {e.stderr}")
-        raise
-
-    return _parse_claude_json(proc.stdout, len(chunks))
+        result = run_structured(prompt, _SpeakerAssignments, model)
+    except Exception as e:
+        logger.error(f"LLM diarization failed ({model}): {e}")
+        return [None] * len(chunks)
+    return _labels_by_chunk(result.labels, len(chunks), max_speaker)
 
 
-def _parse_claude_json(raw: str, expected_len: int) -> list[int | None]:
-    """Extract and normalize the per-chunk label array from claude's output."""
-    raw = raw.strip()
-    # Tolerate markdown fences or surrounding prose by grabbing the first
-    # top-level JSON array of objects.
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        m = _JSON_ARRAY_RE.search(raw)
-        if not m:
-            logger.error(f"Claude output had no parseable JSON array:\n{raw[:500]}")
-            return [None] * expected_len
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON after regex extract: {e}")
-            return [None] * expected_len
-
-    if not isinstance(data, list):
-        logger.error(f"Claude JSON was not a list: {type(data).__name__}")
-        return [None] * expected_len
-
+def _labels_by_chunk(entries: list[_SpeakerAssignment], expected_len: int, max_speaker: int) -> list[int | None]:
     labels: list[int | None] = [None] * expected_len
-    for entry in data:
-        if not isinstance(entry, dict):
-            continue
-        idx = entry.get("id")
-        spk = entry.get("speaker")
-        if isinstance(idx, int) and 0 <= idx < expected_len and isinstance(spk, int) and spk >= 1:
-            labels[idx] = spk
+    for entry in entries:
+        if 0 <= entry.id < expected_len and entry.speaker <= max_speaker:
+            labels[entry.id] = entry.speaker
 
     missing = sum(1 for x in labels if x is None)
     if missing:
-        logger.warning(f"Claude labeled {expected_len - missing}/{expected_len} chunks; rest = None.")
+        logger.warning(f"LLM labeled {expected_len - missing}/{expected_len} chunks; rest = None.")
     return labels

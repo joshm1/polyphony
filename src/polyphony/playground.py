@@ -18,6 +18,8 @@ def playground_payload(
     audio_name: str,
     transcript_path: Path,
     asr_flags: list[WordFlag],
+    paragraph_breaks: list[int] | None,
+    review_threshold: int,
     audio_url: str | None = None,
 ) -> dict:
     """Assemble the JSON payload the React app reads on load.
@@ -31,14 +33,19 @@ def playground_payload(
         "audio_url": audio_url,
         "transcript_path": str(transcript_path),
         "names": list(names),
+        "review_threshold": review_threshold,
+        # Gemini-chosen break-after chunk ids; lets a review re-render paragraphs without another LLM call.
+        "paragraph_breaks": paragraph_breaks,
+        # Reviewer decisions, filled in by `POST /api/apply`.
+        "review": {"overrides": {}, "word_decisions": {}},
         "chunks": [
             {
                 "idx": lbl.chunk.idx,
                 "start": round(lbl.chunk.start, 2),
                 "end": round(lbl.chunk.end, 2),
                 "text": lbl.chunk.text,
-                "pyannote": lbl.pyannote,
-                "claude": lbl.claude,
+                "audio": lbl.audio,
+                "llm": lbl.llm,
                 "final": lbl.final,
                 "confidence": lbl.confidence,
                 "note": lbl.note,

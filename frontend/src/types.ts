@@ -6,8 +6,8 @@ export interface Chunk {
   start: number;
   end: number;
   text: string;
-  pyannote: number | null;
-  claude: number | null;
+  audio: number | null;
+  llm: number | null;
   final: number;
   confidence: number;
   note: string;
@@ -23,13 +23,26 @@ export interface WordFlag {
   userAdded?: boolean;
 }
 
+export interface ReviewState {
+  overrides: Record<string, number>; // chunk idx → speaker id
+  word_decisions: Record<string, WordDecision>; // asr_flags index → decision
+}
+
 export interface PolyphonyData {
   audio: string;
   audio_url: string | null;
   transcript_path: string;
   names: string[];
+  review_threshold: number;
+  paragraph_breaks: number[] | null;
+  review: ReviewState;
   chunks: Chunk[];
   asr_flags: WordFlag[];
+}
+
+export interface ApplyResult {
+  reviewed_path: string;
+  skipped: { chunk_idx: number; original: string }[];
 }
 
 export type WordDecisionKind = "suggested" | "alternative" | "custom" | "original";

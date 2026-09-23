@@ -4,12 +4,13 @@ A backend owns the *path from audio to labeled chunks*. Everything downstream
 (transcript markdown, review playground, optional ASR correction pass) is
 backend-agnostic: it consumes `list[ChunkLabel]`.
 
-Two backends live behind this interface today:
+Backends behind this interface today:
 
-  - local   — Whisper + pyannote + Claude-diarize + ensemble reconciler
-  - gemini  — one Gemini 2.5 call on Vertex AI that does both at once
+  - local       — Whisper + pyannote + LLM-diarize + ensemble reconciler
+  - gemini      — one Gemini 2.5 call on Vertex AI that does both at once
+  - assemblyai  — hosted ASR + voice diarization, then LLM-diarize + reconciler
 
-Adding a third (e.g. Deepgram, AssemblyAI) is: subclass Backend, implement
+Adding another (e.g. Deepgram) is: subclass Backend, implement
 `preflight` and `run`, register in `backends/__init__.py`.
 """
 
@@ -19,6 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..llm import DEFAULT_LLM_MODEL
 from ..types import ChunkLabel
 
 
@@ -29,11 +31,11 @@ class BackendConfig:
     names: list[str] | None = None
     context_hint: str | None = None
     device: str = "auto"  # torch device, local-backend only
-    claude_cwd: Path | None = None  # used by local backend's Claude sub-calls
-    # Gemini-specific (ignored by local backend)
+    llm_model: str = DEFAULT_LLM_MODEL  # pydantic-ai model string for text-side diarization + reconciler
+    # Hosted-backend knobs (ignored by local backend)
     project: str | None = None
     location: str | None = None
-    model: str | None = None
+    model: str | None = None  # Gemini model id, or AssemblyAI speech model
     gcs_bucket: str | None = None
 
 

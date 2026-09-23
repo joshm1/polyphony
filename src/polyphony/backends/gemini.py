@@ -280,8 +280,8 @@ A "turn" is a continuous utterance by one speaker. Short interjections ("right",
             labels.append(
                 ChunkLabel(
                     chunk=chunk,
-                    pyannote=None,  # not applicable
-                    claude=t.speaker,  # Gemini fulfilling the text-signal role
+                    audio=None,  # not applicable
+                    llm=t.speaker,  # Gemini fulfilling the text-signal role
                     final=t.speaker,
                     confidence=t.confidence,
                     note="gemini single-call",

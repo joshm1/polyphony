@@ -7,6 +7,7 @@ small JSON API the app fetches on mount. Split by path prefix:
   GET /assets/*            → bundled JS/CSS/source-maps
   GET /api/data            → the review payload (ChunkLabels + ASR flags)
   GET /api/audio           → the source audio with HTTP Range support
+  POST /api/apply          → persist review decisions, write the reviewed transcript
 
 The React bundle has no knowledge of server-side substitution: it just
 does `fetch('/api/data')` on startup. That keeps the built HTML fully
@@ -21,18 +22,41 @@ import json
 import socket
 from importlib.resources import files
 from pathlib import Path
+from typing import Literal
 
 import click
 from loguru import logger
+from pydantic import BaseModel
 
 from .asr_correction import WordFlag
-from .cache import load_asr_flags
 from .playground import playground_payload
+from .review import apply_review, reviewed_path
 from .types import ChunkLabel
 
 # The built frontend ships as a package resource. We resolve the path at
 # import time so FastAPI's StaticFiles can mount the directory.
 STATIC_DIR = Path(str(files(__package__) / "static"))
+
+
+class ReviewFlag(BaseModel):
+    chunk_idx: int
+    original: str
+    suggested: str
+    alternatives: list[str] = []
+    confidence: int
+    reason: str = ""
+    userAdded: bool | None = None  # noqa: N815 — mirrors the frontend's WordFlag field
+
+
+class WordDecision(BaseModel):
+    kind: Literal["suggested", "alternative", "custom", "original"]
+    value: str
+
+
+class ApplyRequest(BaseModel):
+    overrides: dict[int, int]  # chunk idx → speaker id
+    asr_flags: list[ReviewFlag]  # includes reviewer-added flags
+    word_decisions: dict[int, WordDecision]  # asr_flags index → decision
 
 
 def _find_free_port(start: int) -> int:
@@ -141,6 +165,20 @@ def serve_review(
             headers=headers,
         )
 
+    @app.post("/api/apply")
+    def api_apply(req: ApplyRequest) -> JSONResponse:
+        data["asr_flags"] = [f.model_dump(exclude_none=True) for f in req.asr_flags]
+        data["review"] = {
+            "overrides": {str(k): v for k, v in req.overrides.items()},
+            "word_decisions": {str(k): d.model_dump() for k, d in req.word_decisions.items()},
+        }
+        markdown, skipped = apply_review(data)
+        out = reviewed_path(labels_path)
+        out.write_text(markdown)
+        labels_path.write_text(json.dumps({k: v for k, v in data.items() if k != "audio_url"}, indent=2))
+        logger.info(f"Applied review → {out} ({len(skipped)} correction(s) skipped)")
+        return JSONResponse({"reviewed_path": str(out), "skipped": skipped})
+
     # Everything else → the React entrypoint. Declared last so explicit
     # routes (/assets/*, /api/*) win first.
     @app.get("/{_path:path}")
@@ -198,6 +236,8 @@ def dump_labels_sidecar(
     names: list[str] | None,
     audio_path: Path,
     transcript_path: Path,
+    paragraph_breaks: list[int] | None,
+    review_threshold: int,
 ) -> None:
     """Persist the review payload next to the transcript for `polyphony serve` to consume later."""
     data = playground_payload(
@@ -206,10 +246,8 @@ def dump_labels_sidecar(
         audio_name=audio_path.name,
         transcript_path=transcript_path,
         asr_flags=asr_flags,
+        paragraph_breaks=paragraph_breaks,
+        review_threshold=review_threshold,
     )
     path.write_text(json.dumps(data, indent=2))
     logger.info(f"Wrote review sidecar: {path}")
-
-
-def load_asr_flags_or_empty(audio_path: Path) -> list[WordFlag]:
-    return load_asr_flags(audio_path) or []
