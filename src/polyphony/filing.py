@@ -31,7 +31,9 @@ _MAX_TRANSCRIPT_CHARS = 12_000
 
 class FilingProposal(BaseModel):
     folder: str = Field(description="Folder relative to the vault root. Prefer an existing folder.")
-    basename: str = Field(description="File name without extension, following the vault's naming conventions.")
+    basename: str = Field(
+        description="File name without extension: the vault's naming convention applied to what the recording is about."
+    )
     reason: str = Field(description="≤25 words: why this folder and name.")
 
 
@@ -131,12 +133,13 @@ Rules:
 - Prefer an existing folder. Only propose a new folder when nothing fits, and then
   only one level under the closest existing folder.
 - If similar recordings nearby live in a dedicated subfolder, use that pattern.
-- Match nearby naming conventions (date format, separators, casing). If there's no
-  convention, use "YYYY-MM-DD <short description>".
+- Build the name from the recording date and what the conversation is about (who
+  and what, in a few words), formatted like its neighbors (date format,
+  separators, casing). If nearby files share no convention, use
+  "YYYY-MM-DD <short description>".
 - The name must not include a file extension.
 
 Recording date: {date:%Y-%m-%d %H:%M}
-Current file name: {audio_path.name}
 Speakers: {named}
 Context hint: {context_hint or "(none)"}
 
