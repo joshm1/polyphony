@@ -1,0 +1,57 @@
+.claude/skills
+  s_1dad9d6629ee5e::t_6a2b3c3287c812 1
+.agents/skills/building-pydantic-ai-agents/SKILL.md
+  s_1dad9d6629ee5e::t_925c023ce3ddb0 1-401
+.agents/skills/building-pydantic-ai-agents/references/AGENTS-CORE.md
+  s_1dad9d6629ee5e::t_de4df946a2216a 1-192
+.agents/skills/building-pydantic-ai-agents/references/ARCHITECTURE.md
+  s_1dad9d6629ee5e::t_baf9c412281786 1-259
+.agents/skills/building-pydantic-ai-agents/references/CAPABILITIES-AND-HOOKS.md
+  s_1dad9d6629ee5e::t_dd17f8726eae0c 1-227
+.agents/skills/building-pydantic-ai-agents/references/COMMON-TASKS.md
+  s_1dad9d6629ee5e::t_69e9f039e62d2d 1-113
+.agents/skills/building-pydantic-ai-agents/references/INPUT-AND-HISTORY.md
+  s_1dad9d6629ee5e::t_bcfc055470d4ed 1-131
+.agents/skills/building-pydantic-ai-agents/references/NATIVE-TOOLS.md
+  s_1dad9d6629ee5e::t_4ce756c6c90d14 1-87
+.agents/skills/building-pydantic-ai-agents/references/ON-DEMAND-CAPABILITIES.md
+  s_1dad9d6629ee5e::t_021224fff87744 1-180
+.agents/skills/building-pydantic-ai-agents/references/ORCHESTRATION-AND-INTEGRATIONS.md
+  s_1dad9d6629ee5e::t_ec2f44702d686c 1-165
+.agents/skills/building-pydantic-ai-agents/references/TESTING-AND-DEBUGGING.md
+  s_1dad9d6629ee5e::t_736ec962bb454b 1-87
+.agents/skills/building-pydantic-ai-agents/references/TOOLS-ADVANCED.md
+  s_1dad9d6629ee5e::t_386bb95c353a48 1-207
+.agents/skills/building-pydantic-ai-agents/references/TOOLS-CORE.md
+  s_1dad9d6629ee5e::t_3fbd0763876741 1-119
+.agents/skills/pydantic-ai-harness/SKILL.md
+  s_1dad9d6629ee5e::t_441cf22c0479a8 1-126
+.agents/skills/pydantic-ai-harness/references/CODE-MODE.md
+  s_1dad9d6629ee5e::t_55deed44f354d2 1-191
+.agents/skills/pydantic/SKILL.md
+  s_1dad9d6629ee5e::t_061a5fb38b738e 1-312
+.kiro/skills/building-pydantic-ai-agents
+  s_1dad9d6629ee5e::t_2045e7fa258d01 1
+.kiro/skills/pydantic
+  s_1dad9d6629ee5e::t_5de8c585de1693 1
+.kiro/skills/pydantic-ai-harness
+  s_1dad9d6629ee5e::t_bee72b0ac4f4d1 1
+skills-lock.json
+  s_1dad9d6629ee5e::t_7f20638054da5d 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e41a8492a882d34264a388bccec96cfe3845b4f7",
+  "prompts": {},
+  "sessions": {
+    "s_1dad9d6629ee5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4e225c1-4b9b-4568-85a0-a1ed1a8f4c4e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
