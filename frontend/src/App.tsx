@@ -594,6 +594,13 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     }
   }, [postJson, reviewState]);
 
+  // Until the recording lives in the vault, Apply files it there (after confirming the location).
+  const needsFiling = !!data.vault && !data.in_vault;
+  const openFiling = useCallback(() => {
+    setVaultOpen(true);
+    if (!vaultProposal) void proposeVaultLocation();
+  }, [vaultProposal, proposeVaultLocation]);
+
   const moveToVault = useCallback(async () => {
     setApplyStatus({ kind: "busy", action: "move" });
     try {
@@ -657,21 +664,16 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       >
         Speakers & context
       </button>
-      {data.vault && (
-        <button
-          type="button"
-          className={`secondary${vaultOpen ? " active" : ""}`}
-          onClick={() => setVaultOpen((o) => !o)}
-        >
-          Move to vault
-        </button>
-      )}
       <button
         type="button"
         className="primary"
-        onClick={applyReview}
+        onClick={needsFiling ? openFiling : applyReview}
         disabled={busy}
-        title="Write the reviewed transcript next to the raw one (raw is never modified)"
+        title={
+          needsFiling
+            ? "Apply your review and file the recording into your vault"
+            : "Write the reviewed transcript next to the raw one (raw is never modified)"
+        }
       >
         {busy && applyStatus.action === "apply" ? "Applying…" : "Apply"}
       </button>
@@ -753,9 +755,9 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         <section className="context-panel">
           <div className="context-row context-actions">
             <span className="hint">
-              Files this recording into <code>{data.vault}</code>. The LLM browses the vault's
-              folder and file names (not their contents) and suggests where it belongs; nothing
-              moves until you click Move. Your current review is applied first.
+              Applying files this recording into <code>{data.vault}</code>. The LLM browses the
+              vault's folder and file names (not their contents) and suggests where it belongs; edit
+              the folder or name if needed. The raw transcript moves along, unmodified.
             </span>
             <button
               type="button"
@@ -763,7 +765,11 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
               onClick={proposeVaultLocation}
               disabled={busy}
             >
-              {busy && applyStatus.action === "propose" ? "Thinking…" : "Suggest location"}
+              {busy && applyStatus.action === "propose"
+                ? "Thinking…"
+                : vaultProposal
+                  ? "Suggest again"
+                  : "Suggest location"}
             </button>
           </div>
           <div className="context-row">
@@ -802,14 +808,19 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           )}
           <div className="context-row context-actions">
             <span />
-            <button
-              type="button"
-              className="primary"
-              onClick={moveToVault}
-              disabled={busy || !vaultFolder.trim() || !vaultName.trim()}
-            >
-              {busy && applyStatus.action === "move" ? "Moving…" : "Move"}
-            </button>
+            <div className="button-group">
+              <button type="button" className="secondary" onClick={applyReview} disabled={busy}>
+                Apply without moving
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={moveToVault}
+                disabled={busy || !vaultFolder.trim() || !vaultName.trim()}
+              >
+                {busy && applyStatus.action === "move" ? "Applying…" : "Apply & move"}
+              </button>
+            </div>
           </div>
         </section>
       )}

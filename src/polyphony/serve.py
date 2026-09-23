@@ -141,9 +141,14 @@ def serve_review(
         name="assets",
     )
 
+    def client_payload() -> dict:
+        """The sidecar plus server-side facts the UI needs; these never get written back."""
+        in_vault = vault is not None and vault.resolve() in audio_path.resolve().parents
+        return {**data, "vault": str(vault) if vault else None, "in_vault": in_vault}
+
     @app.get("/api/data")
     def api_data() -> JSONResponse:
-        return JSONResponse({**data, "vault": str(vault) if vault else None})
+        return JSONResponse(client_payload())
 
     @app.get("/api/audio")
     def api_audio(request: Request):
@@ -201,7 +206,7 @@ def serve_review(
         markdown, skipped = apply_review(data)
         out = reviewed_path(labels_path)
         out.write_text(markdown)
-        labels_path.write_text(json.dumps({k: v for k, v in data.items() if k not in ("audio_url", "vault")}, indent=2))
+        labels_path.write_text(json.dumps({k: v for k, v in data.items() if k != "audio_url"}, indent=2))
         logger.info(f"Applied review → {out} ({len(skipped)} correction(s) skipped)")
         return out, skipped
 
@@ -218,7 +223,7 @@ def serve_review(
         take_review_state(req)
         data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
         out, skipped = write_outputs()
-        return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": data})
+        return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": client_payload()})
 
     def require_vault() -> Path:
         if vault is None:

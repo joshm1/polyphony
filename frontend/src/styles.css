@@ -190,6 +190,10 @@ button.secondary.active {
 .context-actions {
   justify-content: space-between;
 }
+.button-group {
+  display: flex;
+  gap: 8px;
+}
 .context-actions .hint {
   color: var(--muted);
   flex: 1;
