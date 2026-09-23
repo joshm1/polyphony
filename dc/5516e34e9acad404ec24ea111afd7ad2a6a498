@@ -1,0 +1,83 @@
+tests/test_review.py
+  s_1dad9d6629ee5e::t_2459f04adc0040 67-100
+tests/test_filing.py
+  s_1dad9d6629ee5e::t_9d3d95cdb3268f 15,17,19-20
+  s_1dad9d6629ee5e::t_bffca227a50c36 1-14,16,18,21-69
+src/polyphony/cli.py
+  s_1dad9d6629ee5e::t_62fb7fe511ac78 208-210
+  s_1dad9d6629ee5e::t_88b7f700f7ae73 232-239,263
+frontend/src/types.ts
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 40,54-74
+  s_1dad9d6629ee5e::t_0bd45ad77d22e5 35,37-39,52-53
+  s_1dad9d6629ee5e::t_2715865fd6e8d1 75
+src/polyphony/playground.py
+  s_1dad9d6629ee5e::t_62fb7fe511ac78 23-25,38,41-45,63-74
+src/polyphony/asr_correction.py
+  s_1dad9d6629ee5e::t_21bbc0f57541ef 96-104,116
+src/polyphony/reanalyze.py
+  s_1dad9d6629ee5e::t_ded4cd1ac7de53 75
+  s_1dad9d6629ee5e::t_5a0ff340200acd 106
+  s_1dad9d6629ee5e::t_fdaac2f4f34c7e 1-74,76-105,107-113
+frontend/src/main.tsx
+  s_1dad9d6629ee5e::t_0bd45ad77d22e5 12-13,39-42,45,47-50
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 4,14,44
+  s_1dad9d6629ee5e::t_af99d6b7cf875c 43,46
+frontend/src/App.tsx
+  s_1dad9d6629ee5e::t_af99d6b7cf875c 76,78,108,576,578,862-863
+  s_1dad9d6629ee5e::t_751ef720a2d4e9 17
+  s_1dad9d6629ee5e::t_0bd45ad77d22e5 43-44,48-52,55,79-82,112-120,537-556,558-573,650,653-659,673,676,816-861,864-870
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 14,20-21,38-40,45-47,54,77,83-86,574-575,577,579-598,600-610,615,660-668,687-691,752-815
+  s_1dad9d6629ee5e::t_744b8502507b7f 53,871
+src/polyphony/static/assets/main.js
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 1,9,17,25,33-34,36-38,40-41
+src/polyphony/review.py
+  s_1dad9d6629ee5e::t_9784a72537c30a 10,60-78,85-88,92-94,96-100
+src/polyphony/static/assets/index.css
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 205-208
+  s_1dad9d6629ee5e::t_af99d6b7cf875c 150-197
+README.md
+  s_1dad9d6629ee5e::t_8691c8343a3e2e 36,209
+src/polyphony/llm.py
+  s_1dad9d6629ee5e::t_f768910cee3d46 12,36-42,44
+src/polyphony/serve.py
+  s_1dad9d6629ee5e::t_ec9fd03d902fad 35,245-247
+  s_1dad9d6629ee5e::t_eccf5ceb65c368 12-13,69-73,110,146,204,222-244,248-266
+  s_1dad9d6629ee5e::t_ded4cd1ac7de53 36,130-133
+  s_1dad9d6629ee5e::t_3f013f0da2ff86 66,75,192-193
+  s_1dad9d6629ee5e::t_62fb7fe511ac78 327-329,340-342
+  s_1dad9d6629ee5e::t_5a0ff340200acd 11,38,74,76-77,191,199-200,206-211,214-221
+  s_1dad9d6629ee5e::t_09a12b61f4e14f 67-68,267
+src/polyphony/filing.py
+  s_1dad9d6629ee5e::t_3bbe1a89686221 92-95,176-179
+  s_1dad9d6629ee5e::t_e924e9c5dd52dd 1-75,80-91,96-161,163-175,180-186
+  s_1dad9d6629ee5e::t_eccf5ceb65c368 76-79,162
+src/polyphony/cache.py
+  s_1dad9d6629ee5e::t_21bbc0f57541ef 121-124,127,131,154-155
+src/polyphony/paragraphize.py
+  s_1dad9d6629ee5e::t_2459f04adc0040 115
+src/polyphony/transcript.py
+  s_1dad9d6629ee5e::t_9784a72537c30a 21-22
+src/polyphony/speaker_names.py
+  s_1dad9d6629ee5e::t_5a131bfc790c9c 1-66
+frontend/src/styles.css
+  s_1dad9d6629ee5e::t_ed51eacc3e2154 205-208
+  s_1dad9d6629ee5e::t_af99d6b7cf875c 150-197
+src/polyphony/static/assets/main.js.map
+  s_1dad9d6629ee5e::t_f263bbd7abd5aa 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "dc5516e34e9acad404ec24ea111afd7ad2a6a498",
+  "prompts": {},
+  "sessions": {
+    "s_1dad9d6629ee5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4e225c1-4b9b-4568-85a0-a1ed1a8f4c4e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
