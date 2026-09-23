@@ -39,6 +39,8 @@ export interface PolyphonyData {
   context_hint: string | null;
   vault: string | null; // injected by the server; null when no vault is configured
   in_vault: boolean; // the recording already lives inside the vault
+  summary?: TranscriptSummary | null;
+  summary_stale: boolean; // the reviewed transcript changed since the summary was generated
   paragraph_breaks: number[] | null;
   review: ReviewState;
   chunks: Chunk[];
@@ -52,6 +54,20 @@ export interface ApplyResult {
 
 export interface ReanalyzeResult extends ApplyResult {
   data: PolyphonyData;
+}
+
+export interface TranscriptSummary {
+  tldr: string;
+  key_points: string[];
+  decisions: string[];
+  action_items: { owner: string | null; task: string }[];
+  model: string;
+  created_at: string;
+}
+
+export interface SummaryResult {
+  summary: TranscriptSummary;
+  summary_stale: boolean;
 }
 
 export interface VaultProposal {

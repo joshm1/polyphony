@@ -9,6 +9,7 @@ small JSON API the app fetches on mount. Split by path prefix:
   GET /api/audio           → the source audio with HTTP Range support
   POST /api/apply          → persist review decisions, write the reviewed transcript
   POST /api/reanalyze      → rerun the LLM passes with new names / context hint
+  POST /api/summary        → the stored summary, or generate one via the LLM
   POST /api/vault/propose  → LLM-suggested vault folder + name for this recording
   POST /api/vault/move     → apply the review, then move all files into the vault
 
@@ -36,7 +37,8 @@ from .filing import move_recording, obsidian_url, planned_moves, propose_locatio
 from .llm import DEFAULT_LLM_MODEL
 from .playground import playground_payload
 from .reanalyze import reanalyze
-from .review import apply_review, reviewed_path
+from .review import apply_review, render_reviewed_transcript, reviewed_path
+from .summarize import summarize, transcript_digest
 from .types import ChunkLabel
 
 # The built frontend ships as a package resource. We resolve the path at
@@ -64,6 +66,10 @@ class ApplyRequest(BaseModel):
     asr_flags: list[ReviewFlag]  # includes reviewer-added flags
     word_decisions: dict[int, WordDecision]  # asr_flags index → decision
     names: list[str] | None = None  # indexed by speaker id - 1; "" = unnamed; None = keep current
+
+
+class SummaryRequest(ApplyRequest):
+    regenerate: bool = False
 
 
 class VaultMoveRequest(ApplyRequest):
@@ -144,7 +150,13 @@ def serve_review(
     def client_payload() -> dict:
         """The sidecar plus server-side facts the UI needs; these never get written back."""
         in_vault = vault is not None and vault.resolve() in audio_path.resolve().parents
-        return {**data, "vault": str(vault) if vault else None, "in_vault": in_vault}
+        return {**data, "vault": str(vault) if vault else None, "in_vault": in_vault, "summary_stale": summary_stale()}
+
+    def summary_stale() -> bool:
+        summary = data.get("summary")
+        if not summary:
+            return False
+        return summary["source_digest"] != transcript_digest(render_reviewed_transcript(data)[0])
 
     @app.get("/api/data")
     def api_data() -> JSONResponse:
@@ -224,6 +236,19 @@ def serve_review(
         data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
         out, skipped = write_outputs()
         return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": client_payload()})
+
+    # Sync handler: summarizing an hour of transcript takes a while.
+    @app.post("/api/summary")
+    def api_summary(req: SummaryRequest) -> JSONResponse:
+        if req.regenerate or not data.get("summary"):
+            take_review_state(req)
+            transcript, _ = render_reviewed_transcript(data)
+            try:
+                data["summary"] = summarize(transcript, data.get("context_hint"), data["llm_model"])
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Summary failed: {e}") from e
+            write_outputs()
+        return JSONResponse({"summary": data["summary"], "summary_stale": summary_stale()})
 
     def require_vault() -> Path:
         if vault is None:

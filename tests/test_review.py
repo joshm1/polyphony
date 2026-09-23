@@ -98,3 +98,28 @@ def test_merge_flags_carries_explicit_decisions_and_user_flags():
     assert [(f["chunk_idx"], f["original"]) for f in flags] == [(2, "x"), (1, "sauce"), (3, "a")]
     # "keep original" follows its span to the new index; the default "suggested" choice is not carried.
     assert carried == {"1": {"kind": "original", "value": "sauce"}}
+
+
+# ---------- summary in the reviewed note ----------
+
+
+def test_reviewed_note_puts_summary_above_transcript():
+    data = {
+        "names": ["Host", "Guest"],
+        "chunks": [_chunk(0, "Hello.", 1), _chunk(1, "Hi.", 2)],
+        "asr_flags": [],
+        "summary": {
+            "tldr": "A greeting.",
+            "key_points": ["They said hello."],
+            "decisions": [],
+            "action_items": [{"owner": "Guest", "task": "Reply"}, {"owner": None, "task": "Follow up"}],
+        },
+    }
+    markdown, _ = apply_review(data)
+    assert markdown == (
+        "## Summary\n\nA greeting.\n\n"
+        "### Key points\n\n- They said hello.\n\n"
+        "### Action items\n\n- [ ] **Guest**: Reply\n- [ ] Follow up\n\n"
+        "## Transcript\n\n"
+        "Host: Hello.\n\nGuest: Hi.\n"
+    )

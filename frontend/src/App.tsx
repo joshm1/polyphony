@@ -15,7 +15,9 @@ import type {
   PolyphonyData,
   PopoverState,
   ReanalyzeResult,
+  SummaryResult,
   TextToken,
+  TranscriptSummary,
   Turn,
   VaultMoveResult,
   VaultProposal,
@@ -42,7 +44,7 @@ interface AppProps {
 
 type ActionStatus =
   | { kind: "idle" }
-  | { kind: "busy"; action: "apply" | "reanalyze" | "propose" | "move" }
+  | { kind: "busy"; action: "apply" | "reanalyze" | "propose" | "move" | "summarize" }
   | ({ kind: "done" } & Notice)
   | { kind: "error"; message: string };
 
@@ -81,6 +83,9 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const [contextHint, setContextHint] = useState(data.context_hint ?? "");
   const [contextOpen, setContextOpen] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(false);
+  const [summary, setSummary] = useState<TranscriptSummary | null>(data.summary ?? null);
+  const [summaryStale, setSummaryStale] = useState(data.summary_stale);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [vaultFolder, setVaultFolder] = useState("");
   const [vaultName, setVaultName] = useState("");
   const [vaultProposal, setVaultProposal] = useState<VaultProposal | null>(null);
@@ -594,6 +599,25 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     }
   }, [postJson, reviewState]);
 
+  const generateSummary = useCallback(
+    async (regenerate: boolean) => {
+      setSummaryOpen(true);
+      setApplyStatus({ kind: "busy", action: "summarize" });
+      try {
+        const result = await postJson<SummaryResult>("/api/summary", {
+          ...reviewState(),
+          regenerate,
+        });
+        setSummary(result.summary);
+        setSummaryStale(result.summary_stale);
+        setApplyStatus({ kind: "idle" });
+      } catch (e: unknown) {
+        setApplyStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    [postJson, reviewState],
+  );
+
   // Until the recording lives in the vault, Apply files it there (after confirming the location).
   const needsFiling = !!data.vault && !data.in_vault;
   const openFiling = useCallback(() => {
@@ -663,6 +687,17 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         onClick={() => setContextOpen((o) => !o)}
       >
         Speakers & context
+      </button>
+      <button
+        type="button"
+        className={`secondary${summaryOpen ? " active" : ""}`}
+        onClick={() => (summary ? setSummaryOpen((o) => !o) : generateSummary(false))}
+        disabled={busy && !summary}
+        title={
+          summary ? "Show the saved summary" : "Summarize the reviewed transcript with the LLM"
+        }
+      >
+        {busy && applyStatus.action === "summarize" ? "Summarizing…" : "Summary"}
       </button>
       <button
         type="button"
@@ -751,13 +786,69 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         )}
       </header>
 
+      {summaryOpen && (
+        <section className="context-panel summary-panel">
+          {summary ? (
+            <>
+              <p className="summary-tldr">{summary.tldr}</p>
+              {(
+                [
+                  ["Key points", summary.key_points],
+                  ["Decisions", summary.decisions],
+                  [
+                    "Action items",
+                    summary.action_items.map((a) => (a.owner ? `${a.owner}: ${a.task}` : a.task)),
+                  ],
+                ] as const
+              )
+                .filter(([, items]) => items.length > 0)
+                .map(([heading, items]) => (
+                  <div key={heading}>
+                    <h3>{heading}</h3>
+                    <ul>
+                      {items.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              <div className="context-row context-actions">
+                <span className="hint">
+                  {summaryStale ? "The transcript changed since this summary. " : ""}
+                  {summary.model} · {new Date(summary.created_at).toLocaleString()} · saved in the
+                  reviewed note
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => generateSummary(true)}
+                  disabled={busy}
+                >
+                  {busy && applyStatus.action === "summarize" ? "Summarizing…" : "Regenerate"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <span className="hint">
+              {busy && applyStatus.action === "summarize"
+                ? `Summarizing with ${data.llm_model}… (about 30s)`
+                : "No summary yet."}
+            </span>
+          )}
+        </section>
+      )}
+
       {vaultOpen && data.vault && (
         <section className="context-panel">
           <div className="context-row context-actions">
             <span className="hint">
-              Applying files this recording into <code>{data.vault}</code>. The LLM browses the
-              vault's folder and file names (not their contents) and suggests where it belongs; edit
-              the folder or name if needed. The raw transcript moves along, unmodified.
+              Applying files this recording into its own folder in <code>{data.vault}</code>:{" "}
+              <code>
+                {vaultFolder || "<folder>"}/{vaultName || "<name>"}/
+              </code>
+              . The LLM browses the vault's folder and file names (not their contents) and suggests
+              where it belongs; edit the folder or name if needed. The raw transcript moves along,
+              unmodified.
             </span>
             <button
               type="button"
@@ -781,7 +872,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
               type="text"
               className="wide"
               value={vaultFolder}
-              placeholder="Relative to the vault root"
+              placeholder="Parent folder, relative to the vault root"
               onChange={(e: ChangeEvent<HTMLInputElement>) => setVaultFolder(e.target.value)}
             />
           </div>
@@ -794,7 +885,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
               type="text"
               className="wide"
               value={vaultName}
-              placeholder="Without extension"
+              placeholder="YYYY-MM-DD Short Title — names the recording's folder and files"
               onChange={(e: ChangeEvent<HTMLInputElement>) => setVaultName(e.target.value)}
             />
           </div>

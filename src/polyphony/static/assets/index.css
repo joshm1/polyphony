@@ -190,6 +190,24 @@ button.secondary.active {
 .context-actions {
   justify-content: space-between;
 }
+.summary-panel h3 {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.summary-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.summary-tldr {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
 .button-group {
   display: flex;
   gap: 8px;

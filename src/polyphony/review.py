@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .paragraphize import paragraphs_for
+from .summarize import summary_markdown
 from .transcript import build_transcript
 from .types import Chunk, ChunkLabel
 
@@ -77,7 +78,14 @@ def labels_from_payload(data: dict[str, Any]) -> list[ChunkLabel]:
 
 
 def apply_review(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
-    """Render the reviewed markdown from a sidecar payload carrying a `review` block.
+    """The reviewed note: the stored summary (if any) above the reviewed transcript."""
+    transcript, skipped = render_reviewed_transcript(data)
+    summary = data.get("summary")
+    return (summary_markdown(summary) + transcript if summary else transcript), skipped
+
+
+def render_reviewed_transcript(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Render the reviewed transcript from a sidecar payload carrying a `review` block.
 
     Returns (markdown, skipped) where `skipped` lists corrections whose
     original span no longer appears in its chunk.

@@ -41,7 +41,7 @@ def test_clean_basename_strips_path_characters():
 def test_move_recording_renames_everything_and_rewrites_sidecar(tmp_path):
     audio, vault = _recording(tmp_path)
     moves = move_recording(audio, vault, "Health/Visits", "2026-09-23 Follow-up")
-    dest = vault / "Health" / "Visits"
+    dest = vault / "Health" / "Visits" / "2026-09-23 Follow-up"
     assert sorted(p.name for p in dest.iterdir()) == [
         "2026-09-23 Follow-up.assemblyai.transcript.md",
         "2026-09-23 Follow-up.assemblyai.transcript.polyphony.json",
@@ -55,10 +55,10 @@ def test_move_recording_renames_everything_and_rewrites_sidecar(tmp_path):
     assert sidecar["transcript_path"] == str(dest / "2026-09-23 Follow-up.assemblyai.transcript.md")
 
 
-def test_move_recording_refuses_to_overwrite(tmp_path):
+def test_move_recording_refuses_a_non_empty_recording_folder(tmp_path):
     audio, vault = _recording(tmp_path)
-    (vault / "Notes").mkdir()
-    (vault / "Notes" / "Taken.m4a").write_bytes(b"existing")
+    (vault / "Notes" / "Taken").mkdir(parents=True)
+    (vault / "Notes" / "Taken" / "other.md").write_text("existing")
     with pytest.raises(FileExistsError):
         move_recording(audio, vault, "Notes", "Taken")
     assert audio.exists()  # nothing moved

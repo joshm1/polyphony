@@ -1,10 +1,11 @@
 """File a recording and its polyphony outputs into a notes vault (e.g. Obsidian).
 
-The LLM proposes a folder + base name by browsing the vault's folder/file
+The LLM proposes a parent folder + name by browsing the vault's folder/file
 names through read-only tools confined to the vault; the reviewer confirms
-or edits before anything moves. Moving renames the audio and every
-`<stem>.*.transcript*` sibling together, so `polyphony serve` still finds
-the sidecar next to the audio afterwards.
+or edits before anything moves. Each recording gets its own
+`<folder>/<name>/` folder, since it's several files: the audio and every
+`<stem>.*.transcript*` sibling move there together, renamed to `<name>`, so
+`polyphony serve` still finds the sidecar next to the audio afterwards.
 """
 
 from __future__ import annotations
@@ -30,9 +31,11 @@ _MAX_TRANSCRIPT_CHARS = 12_000
 
 
 class FilingProposal(BaseModel):
-    folder: str = Field(description="Folder relative to the vault root. Prefer an existing folder.")
+    folder: str = Field(
+        description="Parent folder relative to the vault root; the recording gets its own subfolder inside it."
+    )
     basename: str = Field(
-        description="File name without extension: the vault's naming convention applied to what the recording is about."
+        description="Name for the recording's folder and files: YYYY-MM-DD <Concise Title Case Description>."
     )
     reason: str = Field(description="≤25 words: why this folder and name.")
 
@@ -129,15 +132,18 @@ Explore the vault with the tools before deciding: look at the top-level folders,
 search for folders related to the conversation's subject, people, or organization,
 and look at how similar recordings or notes nearby are named.
 
+Each recording is filed as its own folder, `<folder>/<name>/`, holding the audio and
+its transcripts. You choose the parent `folder` and the `name`.
+
 Rules:
-- Prefer an existing folder. Only propose a new folder when nothing fits, and then
-  only one level under the closest existing folder.
-- If similar recordings nearby live in a dedicated subfolder, use that pattern.
-- Build the name from the recording date and what the conversation is about (who
-  and what, in a few words), formatted like its neighbors (date format,
-  separators, casing). If nearby files share no convention, use
-  "YYYY-MM-DD <short description>".
-- The name must not include a file extension.
+- Prefer an existing parent folder. Only propose a new one when nothing fits, and
+  then only one level under the closest existing folder.
+- If similar recordings nearby are grouped in a dedicated subfolder (e.g. a
+  "recordings" or "calls" folder), use it as the parent.
+- Name it "YYYY-MM-DD <Title>" using the recording date, where <Title> is a concise,
+  human-readable Title Case description of who and what (2-5 words, spaces allowed),
+  e.g. "2026-09-23 Quarterly Budget Review". Don't copy other files' separators or
+  casing, and never include a file extension.
 
 Recording date: {date:%Y-%m-%d %H:%M}
 Speakers: {named}
@@ -160,11 +166,15 @@ def planned_moves(audio_path: Path, dest_dir: Path, basename: str) -> list[tuple
 
 
 def move_recording(audio_path: Path, vault: Path, folder: str, basename: str) -> list[tuple[Path, Path]]:
-    """Move + rename everything; rewrite paths inside moved sidecars. Raises FileExistsError on any clash."""
-    dest_dir = inside_vault(vault, folder)
-    moves = planned_moves(audio_path.resolve(), dest_dir, clean_basename(basename))
-    if clashes := [dst for _, dst in moves if dst.exists()]:
-        raise FileExistsError(f"Already exists: {', '.join(str(c) for c in clashes)}")
+    """Move + rename everything into `<folder>/<basename>/`; rewrite paths inside moved sidecars.
+
+    Raises FileExistsError if that recording folder already has anything in it.
+    """
+    name = clean_basename(basename)
+    dest_dir = inside_vault(vault, folder) / name
+    if dest_dir.exists() and any(dest_dir.iterdir()):
+        raise FileExistsError(f"Already exists and isn't empty: {dest_dir}")
+    moves = planned_moves(audio_path.resolve(), dest_dir, name)
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     for src, dst in moves:
