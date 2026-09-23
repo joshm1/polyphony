@@ -1,0 +1,20 @@
+AGENTS.md
+  s_1dad9d6629ee5e::t_ac1b180ff97edb 1-48,50-56
+  s_1dad9d6629ee5e::t_8691c8343a3e2e 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "23b97d802e68a3ccfeb0af023238632fcff2168d",
+  "prompts": {},
+  "sessions": {
+    "s_1dad9d6629ee5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4e225c1-4b9b-4568-85a0-a1ed1a8f4c4e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
