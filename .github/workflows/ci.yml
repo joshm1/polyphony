@@ -46,13 +46,17 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
+      - name: Frontend lint (oxlint, type-aware)
+        working-directory: frontend
+        run: bun run check:lint
+
+      - name: Frontend format check (oxfmt)
+        working-directory: frontend
+        run: bun run check:fmt
+
       - name: Frontend typecheck
         working-directory: frontend
-        run: bun run typecheck
-
-      - name: Frontend lint (biome)
-        working-directory: frontend
-        run: bun run lint
+        run: bun run check:tsc
 
       # Rebuild the frontend and fail if the committed src/polyphony/static/
       # bundle drifted from the source. This is the gate that keeps the

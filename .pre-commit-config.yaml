@@ -44,20 +44,19 @@ repos:
   - repo: local
     hooks:
       - id: frontend-typecheck
-        name: Frontend typecheck (tsc --noEmit)
-        entry: bash -c 'cd frontend && bun install --silent && bun run typecheck'
+        name: Frontend typecheck (tsc)
+        entry: bash -c 'cd frontend && bun install --silent && bun run check:tsc'
         language: system
-        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig\.json)
+        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig[^/]*\.json|vite\.config\.ts)
         pass_filenames: false
 
       - id: frontend-lint
-        name: Frontend lint + format check (biome)
-        # Uses `biome check` (what CI runs) rather than `--write` so a dirty
-        # tree fails the commit instead of auto-fixing and re-staging behind
-        # the dev's back. Run `cd frontend && bun run format` manually.
-        entry: bash -c 'cd frontend && bun install --silent && bun run lint'
+        name: Frontend lint + format check (oxlint, oxfmt)
+        # Checks rather than rewrites so a dirty tree fails the commit instead of
+        # auto-fixing and re-staging behind the dev's back. Run `cd frontend && bun run fix`.
+        entry: bash -c 'cd frontend && bun install --silent && bun run check:lint && bun run check:fmt'
         language: system
-        files: ^frontend/(src/|package\.json|bun\.lock|biome\.json)
+        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig[^/]*\.json|vite\.config\.ts|\.oxlintrc\.json|\.oxfmtrc\.json)
         pass_filenames: false
 
       - id: build-frontend
@@ -66,5 +65,5 @@ repos:
         # a cd + two commands. The build is fast (<1s with a warm cache).
         entry: bash -c 'cd frontend && bun install --silent && bun run build'
         language: system
-        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig\.json|vite\.config\.ts|index\.html|biome\.json)
+        files: ^frontend/(src/|package\.json|bun\.lock|tsconfig[^/]*\.json|vite\.config\.ts|index\.html)
         pass_filenames: false

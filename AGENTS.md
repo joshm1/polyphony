@@ -20,19 +20,33 @@ uv run polyphony serve examples/demo.m4a  # review UI on :8787 (auto-bumps port)
 uv run polyphony export examples/demo.m4a -f csv -o -   # reviewed data as json/csv/srt/vtt/md
 ```
 
-Frontend (`frontend/`, bun + Vite + React 18 + Biome):
+Frontend (`frontend/`, bun + Vite + React 18 + oxlint + oxfmt):
 
 ```bash
 cd frontend
 bun install
-bun run typecheck    # tsc --noEmit
-bun run lint         # biome check src (CI)
-bun run format       # biome format --write src
+bun run check:lint   # oxlint --type-aware (CI)
+bun run check:fmt    # oxfmt --check (CI)
+bun run check:tsc    # tsc over tsconfig.json (src) and tsconfig.node.json (vite.config.ts) (CI)
+bun run fix          # oxfmt --write + oxlint --fix
 bun run build        # → ../src/polyphony/static/ (committed)
 bun run dev          # vite dev server; proxies /api → localhost:8787, so run `polyphony serve` alongside
 ```
 
-Pre-commit: `uvx pre-commit run --all-files` (ruff, tsc, biome, frontend build).
+Pre-commit: `uvx pre-commit run --all-files` (ruff, tsc, oxlint, oxfmt, frontend build).
+
+## TypeScript standards
+
+Applies to `frontend/`. `tsconfig.base.json`, `.oxlintrc.json` and `.oxfmtrc.json` are copied from the shared standards in joshm1/apps; keep them in step with that source rather than tuning them here.
+
+- `tsconfig.json` and `tsconfig.node.json` extend `tsconfig.base.json` (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`, `allowJs: false`). They add only `include` and `types`; never change a base flag or switch off a check `strict` enables. `check:tsc` type-checks every tsconfig.
+- No `any`, `@ts-ignore`, `@ts-nocheck`, `as unknown as`, or non-null `!` outside tests, and no lint-disable comments. Narrow with checks or a schema instead of asserting with `as`.
+- Parse with Zod at every boundary (`fetch` responses, storage, URL params, `postMessage`), then trust the types inside. Server payloads use plain `z.object` (they gain fields over time); schemas live in `src/types.ts` next to the types they produce, which mirror `playground.py::playground_payload`. Never hand-roll `typeof`/`in` guards on external data.
+- Model variants as discriminated unions and end exhaustive switches with `assertNever`. Shared helpers (`assertNever`, `Result`, branded ids) live in `src/lib/`, mirroring joshm1/apps `packages/types`; add one only when code needs it.
+- Return a `Result` for expected failures the caller must handle; throw for unexpected ones, and throw only `Error`s.
+- Use top-level `import type` for type-only imports.
+- Production code never imports test doubles or fixtures (enforced by lint). Do not write tests that restate what the type checker already proves.
+- Guidance no tool enforces yet: prefer named exports, keeping default exports for what a tool loads by default (configs); add no barrel files.
 
 ## Architecture
 

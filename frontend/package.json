@@ -7,20 +7,23 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "format": "biome format --write src",
-    "lint": "biome check src"
+    "check:lint": "oxlint -c .oxlintrc.json --type-aware .",
+    "check:fmt": "oxfmt -c .oxfmtrc.json --check",
+    "check:tsc": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "fix": "oxfmt -c .oxfmtrc.json --write && oxlint -c .oxlintrc.json --type-aware --fix ."
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.6.3",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "typescript": "^7.0.2",
     "vite": "^5.4.11"
   }
 }

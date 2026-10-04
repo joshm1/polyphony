@@ -1,0 +1,153 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css", "@testing-library/jest-dom/vitest", "expo-router/entry"]
+      }
+    ],
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-explicit-any": "error",
+    "react/exhaustive-deps": "error",
+    "react/rules-of-hooks": "error",
+    "react/react-in-jsx-scope": "off",
+    "no-console": [
+      "error",
+      {
+        "allow": ["warn", "error"]
+      }
+    ],
+    "unicorn/no-null": "off",
+    "unicorn/filename-case": "off",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/no-mixed-enums": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/no-import-type-side-effects": "error"
+  },
+  "env": {
+    "builtin": true,
+    "es2024": true
+  },
+  "ignorePatterns": ["**/dist/**", "**/coverage/**"],
+  "overrides": [
+    {
+      "files": ["**/src/**/*.{ts,tsx}"],
+      "env": {
+        "browser": true
+      }
+    },
+    {
+      "files": ["**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/test/**",
+                  "**/tests/**",
+                  "**/testing",
+                  "**/testing/**",
+                  "**/testing.ts",
+                  "**/fixtures",
+                  "**/fixtures/**",
+                  "**/*.fixture",
+                  "**/*.fixture.ts",
+                  "**/test-support",
+                  "**/test-support.ts",
+                  "**/test-setup",
+                  "**/test-setup.ts",
+                  "**/__mocks__/**",
+                  "**/fake-*",
+                  "**/fake-*/**"
+                ],
+                "message": "Test-only module; production code never imports test doubles or fixtures."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/*.test.{ts,tsx,mjs,js}",
+        "**/__tests__/**/*.{ts,tsx}",
+        "**/vitest.setup.ts",
+        "**/test/setup.ts"
+      ],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off",
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/unbound-method": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.{ts,tsx}",
+        "**/__tests__/**/*.{ts,tsx}",
+        "**/test/**/*.{ts,tsx}",
+        "**/tests/**/*.{ts,tsx}",
+        "**/testing/**/*.{ts,tsx}",
+        "**/testing.ts",
+        "**/fixtures/**/*.{ts,tsx}",
+        "**/*.fixture.ts",
+        "**/test-setup.ts",
+        "**/test-support.ts",
+        "**/vitest.setup.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["**/*.mjs", "**/*.js"],
+      "rules": {
+        "typescript/no-floating-promises": "off",
+        "typescript/no-misused-promises": "off",
+        "typescript/no-misused-spread": "off",
+        "typescript/require-array-sort-compare": "off",
+        "typescript/no-unnecessary-type-conversion": "off",
+        "typescript/restrict-template-expressions": "off",
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/no-base-to-string": "off",
+        "typescript/unbound-method": "off",
+        "typescript/consistent-return": "off",
+        "typescript/no-unnecessary-template-expression": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/only-throw-error": "off",
+        "typescript/prefer-promise-reject-errors": "off",
+        "typescript/use-unknown-in-catch-callback-variable": "off",
+        "typescript/switch-exhaustiveness-check": "off"
+      }
+    }
+  ]
+}
