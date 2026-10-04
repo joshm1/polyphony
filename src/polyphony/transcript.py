@@ -43,10 +43,11 @@ def _group_into_turns(labels: list[ChunkLabel], review_threshold: int) -> list[_
             turns.append(cur)
         cur.chunks.append(lbl.chunk)
         cur.min_conf = min(cur.min_conf, lbl.confidence)
+        # Only the chunks that need review explain the flag; agreed chunks' notes are noise there.
         if lbl.confidence < review_threshold:
             cur.flagged = True
-        if lbl.note:
-            cur.notes.append(f"chunk {lbl.chunk.idx}: {lbl.note}")
+            if lbl.note:
+                cur.notes.append(f"chunk {lbl.chunk.idx}: {lbl.note}")
     return turns
 
 

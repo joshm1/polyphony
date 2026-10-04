@@ -50,12 +50,12 @@ class _Flags(BaseModel):
 
 def flag_asr_errors(
     chunks: list[Chunk],
-    model: str,
+    model: str | None,
     context_hint: str | None = None,
     source_audio: Path | None = None,
 ) -> list[WordFlag]:
-    """Ask the LLM to find likely Whisper transcription errors. Returns [] on failure."""
-    if not chunks:
+    """Ask the LLM to find likely Whisper transcription errors. Returns [] on failure or without an LLM."""
+    if not chunks or model is None:
         return []
 
     numbered = "\n".join(f"[{c.idx}] {c.text}" for c in chunks)

@@ -168,12 +168,30 @@ def pyannote_per_chunk_labels(chunks: list[Chunk], segments: list[PyannoteSegmen
     return labels
 
 
+def pyannote_chunk_purity(chunks: list[Chunk], segments: list[PyannoteSegment]) -> list[float | None]:
+    """Share of each chunk's speech time that belongs to its majority speaker (None = no speech overlap).
+
+    A chunk straddling a speaker change scores well below 1.0, which makes it
+    a single-signal confidence cue when there's no second diarizer to compare against.
+    """
+    purity: list[float | None] = []
+    for ch in chunks:
+        by_speaker: dict[str, float] = {}
+        for seg in segments:
+            overlap = min(ch.end, seg.end) - max(ch.start, seg.start)
+            if overlap > 0:
+                by_speaker[seg.speaker] = by_speaker.get(seg.speaker, 0.0) + overlap
+        total = sum(by_speaker.values())
+        purity.append(max(by_speaker.values()) / total if total > 0 else None)
+    return purity
+
+
 def diarize_pyannote(
     audio_path: Path, chunks: list[Chunk], device: str, source_audio: Path | None = None
-) -> list[int | None]:
-    """End-to-end pyannote: raw segments → per-chunk labels."""
+) -> tuple[list[int | None], list[float | None]]:
+    """End-to-end pyannote: raw segments → per-chunk labels and their purity."""
     segments = _run_pyannote(audio_path, device, source_audio=source_audio)
-    return pyannote_per_chunk_labels(chunks, segments)
+    return pyannote_per_chunk_labels(chunks, segments), pyannote_chunk_purity(chunks, segments)
 
 
 # ---------------- LLM (text-side reasoning) ----------------
@@ -191,17 +209,20 @@ class _SpeakerAssignments(BaseModel):
 def diarize_llm(
     chunks: list[Chunk],
     names: list[str] | None,
-    model: str,
+    model: str | None,
     expected_speakers: int = 2,
 ) -> list[int | None]:
     """Ask the LLM to label each chunk by speaker from the text alone.
 
     Output is keyed by chunk id so it aligns back to chunks exactly, with no
     fuzzy text matching. Any failure yields all-None, which the reconciler
-    treats as "text side silent" and falls back to pyannote.
+    treats as "text side silent" and falls back to pyannote. Without an LLM
+    the text side is silent by definition.
     """
     if not chunks:
         return []
+    if model is None:
+        return [None] * len(chunks)
 
     if names:
         speaker_block = "\n".join(f"  Speaker {i} = {name}" for i, name in enumerate(names, start=1))

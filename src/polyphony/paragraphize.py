@@ -53,7 +53,7 @@ class _Breaks(BaseModel):
 
 def paragraphize(
     labels: list[ChunkLabel],
-    model: str,
+    model: str | None,
     context_hint: str | None = None,
     source_audio: Path | None = None,
 ) -> list[int] | None:
@@ -62,10 +62,12 @@ def paragraphize(
     Returns the sorted chunk ids to break after — stored in the sidecar so a
     review can re-render after speaker overrides without another LLM call.
     Turn them into paragraphs with `paragraphs_for`. Returns None on any
-    failure; the markdown then falls back to one-paragraph-per-turn.
+    failure or without an LLM; the markdown then falls back to one-paragraph-per-turn.
     """
     if not labels:
         return []
+    if model is None:
+        return None
 
     prompt = _build_prompt(labels, context_hint)
     prompt_digest = hashlib.sha256(prompt.encode()).hexdigest()[:16]

@@ -35,7 +35,7 @@ export interface PolyphonyData {
   names: string[]; // indexed by speaker id - 1; "" = unnamed
   review_threshold: number;
   backend: string;
-  llm_model: string;
+  llm_model: string | null; // null = no LLM configured; LLM-only actions are disabled
   context_hint: string | null;
   vault: string | null; // injected by the server; null when no vault is configured
   filed: boolean; // the recording already sits in its own folder inside the vault

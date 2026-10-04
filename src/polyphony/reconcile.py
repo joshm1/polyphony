@@ -1,11 +1,18 @@
 """Ensemble reconciliation of two diarizations, with per-chunk 0-100 confidence.
 
 Given audio-diarizer labels (pyannote / AssemblyAI) and LLM labels per
-chunk, produce a final label per chunk plus a 0-100 confidence score. For
-chunks where the two already agree, confidence is 100 and we skip the
-reconciler. For the rest, we ask the LLM to choose, giving it full surrounding context + both
-candidate labels, and have it emit a confidence score based on how clear
-the evidence was.
+chunk, produce a final label per chunk plus a 0-100 confidence score:
+
+  100     both diarizers agreed
+  ≤70     only one diarizer had a view; scaled down by how much of the chunk's
+          speech its winning speaker owns, when the audio diarizer reports that
+  reconciler-rated
+          the two disagreed and an LLM tie-breaker chose, seeing the full
+          transcript with both candidate labels
+  25      no usable decision; fell back heuristically
+
+Without an LLM (`model=None`) the text side is silent, so every chunk lands
+in the single-signal band and nothing reaches the tie-breaker.
 """
 
 from __future__ import annotations
@@ -16,68 +23,81 @@ from pydantic import BaseModel, Field
 from .llm import run_structured
 from .types import Chunk, ChunkLabel
 
+AGREED_CONFIDENCE = 100
+SINGLE_SIGNAL_CONFIDENCE = 70
+FALLBACK_CONFIDENCE = 25
+
 
 def reconcile(
     chunks: list[Chunk],
     audio: list[int | None],
     llm: list[int | None],
     names: list[str] | None,
-    model: str,
+    model: str | None,
+    audio_purity: list[float | None] | None = None,
 ) -> list[ChunkLabel]:
-    """Merge two candidate diarizations into one with per-chunk confidence."""
-    assert len(chunks) == len(audio) == len(llm), "label arrays must align with chunks"
+    """Merge two candidate diarizations into one with per-chunk confidence.
 
-    # Trivial cases resolved locally; reconciler only sees real disagreements.
-    labels: list[ChunkLabel | None] = [None] * len(chunks)
+    `audio_purity` is the share of each chunk's speech owned by the audio
+    diarizer's winning speaker (see `diarize.pyannote_chunk_purity`).
+    """
+    if not len(chunks) == len(audio) == len(llm):
+        raise ValueError("label arrays must align with chunks")
+    if audio_purity is not None and len(audio_purity) != len(chunks):
+        raise ValueError("audio_purity must align with chunks")
+
+    labels: dict[int, ChunkLabel] = {}
     disputed: list[int] = []  # chunk indexes needing the reconciler
 
     for i, ch in enumerate(chunks):
-        p, c = audio[i], llm[i]
-        if p is not None and c is not None and p == c:
-            labels[i] = ChunkLabel(ch, p, c, final=p, confidence=100, note="both backends agreed")
-        elif p is None and c is None:
-            # Nobody had a view — default to speaker 1 with low confidence; reconciler can adjust.
-            disputed.append(i)
-        elif p is None:
-            labels[i] = ChunkLabel(ch, None, c, final=c, confidence=70, note="audio diarizer silent; used LLM")
-        elif c is None:
-            labels[i] = ChunkLabel(ch, p, None, final=p, confidence=70, note="LLM silent; used audio diarizer")
+        a, t = audio[i], llm[i]
+        if a is not None and t is not None and a == t:
+            labels[i] = ChunkLabel(ch, a, t, final=a, confidence=AGREED_CONFIDENCE, note="both backends agreed")
+        elif a is not None and t is None:
+            purity = audio_purity[i] if audio_purity is not None else None
+            note = "LLM silent; used audio diarizer" if model is not None else "audio diarizer only (no LLM)"
+            if purity is not None and purity < 1:
+                note += f"; {round(purity * 100)}% of chunk speech is this speaker"
+            labels[i] = ChunkLabel(ch, a, None, final=a, confidence=single_signal_confidence(purity), note=note)
+        elif a is None and t is not None:
+            labels[i] = ChunkLabel(
+                ch, None, t, final=t, confidence=SINGLE_SIGNAL_CONFIDENCE, note="audio diarizer silent; used LLM"
+            )
         else:
+            # Real disagreement, or neither side had a view.
             disputed.append(i)
 
-    if not disputed:
+    decisions: dict[int, _Decision] = {}
+    if disputed and model is not None:
+        logger.info(f"Reconciler needed for {len(disputed)}/{len(chunks)} chunks.")
+        decisions = _run_reconciler(chunks, audio, llm, names, disputed, model)
+    elif not disputed:
         logger.info("No disagreements; skipping reconciler.")
-        return [lbl for lbl in labels if lbl is not None]  # type: ignore[misc]
-
-    logger.info(f"Reconciler needed for {len(disputed)}/{len(chunks)} chunks.")
-    decisions = _run_reconciler(chunks, audio, llm, names, disputed, model)
 
     for i in disputed:
         ch = chunks[i]
-        p, c = audio[i], llm[i]
+        a, t = audio[i], llm[i]
         dec = decisions.get(i)
         if dec is None:
-            # Fallback: prefer the audio diarizer when both present, else whichever isn't None, else 1.
-            final = p if p is not None else c if c is not None else 1
-            labels[i] = ChunkLabel(
-                ch,
-                p,
-                c,
-                final=final,
-                confidence=25,
-                note="reconciler omitted this chunk; fell back heuristically",
+            # Prefer the audio diarizer when both present, else whichever isn't None, else speaker 1.
+            final = a if a is not None else t if t is not None else 1
+            note = (
+                "reconciler omitted this chunk; fell back heuristically"
+                if model is not None
+                else "no diarizer labeled this chunk; defaulted to speaker 1"
             )
+            labels[i] = ChunkLabel(ch, a, t, final=final, confidence=FALLBACK_CONFIDENCE, note=note)
         else:
-            labels[i] = ChunkLabel(
-                ch,
-                p,
-                c,
-                final=dec.speaker,
-                confidence=dec.confidence,
-                note=dec.reason or "",
-            )
+            labels[i] = ChunkLabel(ch, a, t, final=dec.speaker, confidence=dec.confidence, note=dec.reason)
 
-    return [lbl for lbl in labels if lbl is not None]  # type: ignore[misc]
+    return [labels[i] for i in range(len(chunks))]
+
+
+def single_signal_confidence(purity: float | None) -> int:
+    """Confidence when only the audio diarizer spoke: capped below agreement, lower for mixed-speaker chunks."""
+    if purity is None:
+        return SINGLE_SIGNAL_CONFIDENCE
+    return round(SINGLE_SIGNAL_CONFIDENCE * max(0.0, min(1.0, purity)))
 
 
 class _Decision(BaseModel):

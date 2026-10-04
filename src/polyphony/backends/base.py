@@ -20,7 +20,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..llm import DEFAULT_LLM_MODEL
 from ..types import ChunkLabel
 
 
@@ -31,7 +30,8 @@ class BackendConfig:
     names: list[str] | None = None
     context_hint: str | None = None
     device: str = "auto"  # torch device, local-backend only
-    llm_model: str = DEFAULT_LLM_MODEL  # pydantic-ai model string for text-side diarization + reconciler
+    # pydantic-ai model string for text-side diarization + reconciler; None = audio diarizer only.
+    llm_model: str | None = None
     # Hosted-backend knobs (ignored by local backend)
     project: str | None = None
     location: str | None = None

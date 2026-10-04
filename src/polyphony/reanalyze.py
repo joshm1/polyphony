@@ -72,7 +72,7 @@ def reanalyze(
     context_hint: str | None,
 ) -> dict[str, Any]:
     """Return an updated sidecar payload. `data` must already carry the reviewer's current state."""
-    model = data["llm_model"]
+    model: str = data["llm_model"]
     overrides = overrides_of(data)
     base = labels_from_payload(data)
     reviewed = [replace(lbl, override=overrides.get(lbl.chunk.idx)) for lbl in base]

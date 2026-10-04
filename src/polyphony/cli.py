@@ -18,9 +18,9 @@ import click
 from loguru import logger
 
 from .asr_correction import flag_asr_errors
-from .backends import BackendUnavailable, resolve_backend
+from .backends import BACKENDS, BackendUnavailable, resolve_backend
 from .backends.base import BackendConfig
-from .llm import DEFAULT_LLM_MODEL
+from .llm import LLMUnavailable, check_llm, resolve_llm_model
 from .paragraphize import paragraphize, paragraphs_for
 from .serve import dump_labels_sidecar, serve_review
 from .transcript import build_transcript
@@ -28,8 +28,12 @@ from .transcript import build_transcript
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-def main(ctx):
-    """polyphony — audio → multi-speaker transcript with review playground."""
+def main(ctx: click.Context) -> None:
+    """polyphony — diarization you can audit.
+
+    Transcribe a recording into a speaker-attributed transcript with per-chunk
+    confidence, review and correct it in the browser, then export the corrected data.
+    """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -94,11 +98,12 @@ def main(ctx):
 )
 @click.option(
     "--llm-model",
-    default=DEFAULT_LLM_MODEL,
-    show_default=True,
-    help="pydantic-ai model for the text-side passes (diarization, reconciliation, paragraphs, ASR correction). "
-    "The openai-codex provider uses your ChatGPT subscription via `codex login`. "
-    "Override via $POLYPHONY_LLM_MODEL.",
+    default=None,
+    show_default="auto",
+    help="LLM for the text-side passes (speaker cross-check, tie-breaking, paragraphs, ASR correction): "
+    "a pydantic-ai `provider:model` string, a bare provider (openai, anthropic, google, openai-codex) for its "
+    "default model, 'auto' (first of $OPENAI_API_KEY / $ANTHROPIC_API_KEY / $GOOGLE_API_KEY that is set), or "
+    "'none' to skip every LLM pass. Defaults to $POLYPHONY_LLM_MODEL, else auto.",
 )
 @click.option(
     "--project",
@@ -130,7 +135,7 @@ def transcribe_cmd(
     review_threshold: int,
     no_asr_correction: bool,
     no_paragraphize: bool,
-    llm_model: str,
+    llm_model: str | None,
     project: str | None,
     location: str | None,
     model: str | None,
@@ -141,6 +146,14 @@ def transcribe_cmd(
     logger.add(sys.stderr, format="<dim>{time:HH:mm:ss}</dim> <level>{message}</level>")
 
     name_list = [n.strip() for n in names.split(",")] if names else None
+    resolved_llm = resolve_llm_model(llm_model)
+    if resolved_llm is None:
+        logger.warning(
+            "No LLM configured: speakers come from the audio diarizer alone, and paragraphing + ASR correction "
+            "are skipped. Set $OPENAI_API_KEY / $ANTHROPIC_API_KEY / $GOOGLE_API_KEY or pass --llm-model."
+        )
+    else:
+        logger.info(f"Text-side LLM: {resolved_llm}")
     selected_backend = resolve_backend(backend)
     logger.info(f"Using backend: {selected_backend.name} (from --backend={backend})")
 
@@ -152,7 +165,7 @@ def transcribe_cmd(
         names=name_list,
         context_hint=context_hint,
         device=device,
-        llm_model=llm_model,
+        llm_model=resolved_llm,
         project=project,
         location=location,
         model=model,
@@ -170,7 +183,7 @@ def transcribe_cmd(
     if not no_paragraphize:
         paragraph_breaks = paragraphize(
             labels,
-            llm_model,
+            resolved_llm,
             context_hint=context_hint,
             source_audio=audio_path,
         )
@@ -188,7 +201,7 @@ def transcribe_cmd(
     if not no_asr_correction:
         asr_flags = flag_asr_errors(
             [lbl.chunk for lbl in labels],
-            llm_model,
+            resolved_llm,
             context_hint=context_hint,
             source_audio=audio_path,
         )
@@ -206,7 +219,7 @@ def transcribe_cmd(
         paragraph_breaks=paragraph_breaks,
         review_threshold=review_threshold,
         backend=selected_backend.name,
-        llm_model=llm_model,
+        llm_model=resolved_llm,
         context_hint=context_hint,
     )
 
@@ -236,28 +249,38 @@ def transcribe_cmd(
     default=None,
     help="Notes vault (e.g. Obsidian) the UI can file this recording into. Or set $POLYPHONY_VAULT.",
 )
-def serve_cmd(audio_path: Path, sidecar: Path | None, port: int, no_open: bool, vault: Path | None):
+@click.option(
+    "--llm-model",
+    default=None,
+    help="LLM for re-analysis, summaries, and vault filing (same values as `transcribe --llm-model`). "
+    "Defaults to the model recorded in the sidecar, else $POLYPHONY_LLM_MODEL, else auto.",
+)
+def serve_cmd(
+    audio_path: Path, sidecar: Path | None, port: int, no_open: bool, vault: Path | None, llm_model: str | None
+):
     """Serve the review playground over HTTP with seekable audio playback."""
     logger.remove()
     logger.add(sys.stderr, format="<dim>{time:HH:mm:ss}</dim> <level>{message}</level>")
 
     if sidecar is None:
-        # Try known defaults — the transcribe command writes
-        # <audio-stem>.<backend>.transcript.polyphony.json.
-        base = audio_path.with_suffix("")
-        for suffix in (
-            ".gemini.transcript.polyphony.json",
-            ".assemblyai.transcript.polyphony.json",
-            ".local.transcript.polyphony.json",
-        ):
-            candidate = base.with_name(f"{base.name}{suffix}")
-            if candidate.exists():
-                sidecar = candidate
-                break
-        if sidecar is None:
-            raise click.ClickException(
-                "No .polyphony.json sidecar found next to the audio. "
-                "Run `polyphony transcribe` first, or pass --sidecar explicitly."
-            )
+        sidecar = find_sidecar(audio_path)
 
-    serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault)
+    model = resolve_llm_model(llm_model) if llm_model else None
+    try:
+        check_llm(model)
+    except LLMUnavailable as e:
+        raise click.ClickException(str(e)) from e
+    serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault, llm_model=model)
+
+
+def find_sidecar(audio_path: Path) -> Path:
+    """The `<audio-stem>.<backend>.transcript.polyphony.json` that `transcribe` wrote next to the audio."""
+    base = audio_path.with_suffix("")
+    for backend in BACKENDS:
+        candidate = base.with_name(f"{base.name}.{backend}.transcript.polyphony.json")
+        if candidate.exists():
+            return candidate
+    raise click.ClickException(
+        f"No .polyphony.json sidecar found next to {audio_path.name}. "
+        "Run `polyphony transcribe` first, or pass the sidecar path explicitly."
+    )

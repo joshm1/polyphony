@@ -54,7 +54,7 @@ class LocalEnsembleBackend(Backend):
             if not chunks:
                 raise RuntimeError("Whisper returned no transcription.")
 
-            pyannote_labels = diarize_pyannote(
+            pyannote_labels, pyannote_purity = diarize_pyannote(
                 wav_path,
                 chunks,
                 device_str,
@@ -68,4 +68,5 @@ class LocalEnsembleBackend(Backend):
             llm_labels,
             cfg.names,
             model=cfg.llm_model,
+            audio_purity=pyannote_purity,
         )

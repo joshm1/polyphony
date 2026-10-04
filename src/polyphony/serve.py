@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from .asr_correction import WordFlag
 from .filing import is_filed, move_recording, obsidian_url, planned_moves, propose_location
-from .llm import DEFAULT_LLM_MODEL
+from .llm import resolve_llm_model
 from .playground import playground_payload
 from .reanalyze import reanalyze
 from .review import apply_review, render_reviewed_transcript, reviewed_path
@@ -114,7 +114,9 @@ def serve_review(
     port: int = 8787,
     open_browser: bool = True,
     vault: Path | None = None,
+    llm_model: str | None = None,
 ) -> None:
+    """Serve the review UI. `llm_model` overrides the model recorded in the sidecar."""
     import uvicorn
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -133,8 +135,9 @@ def serve_review(
     # the client needs to point its <audio> element at.
     data = json.loads(labels_path.read_text())
     data["audio_url"] = "/api/audio"
+    # A sidecar transcribed without an LLM can still use one configured now.
+    data["llm_model"] = llm_model or data.get("llm_model") or resolve_llm_model()
     # Sidecars written before these fields existed.
-    data.setdefault("llm_model", DEFAULT_LLM_MODEL)
     data.setdefault("context_hint", None)
     data.setdefault("review", {"overrides": {}, "word_decisions": {}})
 
@@ -155,6 +158,15 @@ def serve_review(
             "filed": vault is not None and is_filed(vault, audio_path),
             "summary_stale": summary_stale(),
         }
+
+    def require_llm() -> str:
+        model = data["llm_model"]
+        if model is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No LLM configured: set an API key (e.g. $OPENAI_API_KEY) or pass --llm-model, then restart.",
+            )
+        return model
 
     def summary_stale() -> bool:
         summary = data.get("summary")
@@ -236,6 +248,7 @@ def serve_review(
     # minute-long LLM calls don't block audio streaming.
     @app.post("/api/reanalyze")
     def api_reanalyze(req: ReanalyzeRequest) -> JSONResponse:
+        require_llm()
         take_review_state(req)
         data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
         out, skipped = write_outputs()
@@ -245,10 +258,11 @@ def serve_review(
     @app.post("/api/summary")
     def api_summary(req: SummaryRequest) -> JSONResponse:
         if req.regenerate or not data.get("summary"):
+            model = require_llm()
             take_review_state(req)
             transcript, _ = render_reviewed_transcript(data)
             try:
-                data["summary"] = summarize(transcript, data.get("context_hint"), data["llm_model"])
+                data["summary"] = summarize(transcript, data.get("context_hint"), model)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"Summary failed: {e}") from e
             write_outputs()
@@ -263,10 +277,11 @@ def serve_review(
     @app.post("/api/vault/propose")
     def api_vault_propose(req: ApplyRequest) -> JSONResponse:
         root = require_vault()
+        model = require_llm()
         take_review_state(req)
         markdown, _ = apply_review(data)
         proposal = propose_location(
-            root, audio_path, markdown, data.get("names") or [], data.get("context_hint"), data["llm_model"]
+            root, audio_path, markdown, data.get("names") or [], data.get("context_hint"), model
         )
         return JSONResponse(
             {**proposal.model_dump(), "files": [str(src.name) for src, _ in planned_moves(audio_path, root, "x")]}
@@ -359,7 +374,7 @@ def dump_labels_sidecar(
     paragraph_breaks: list[int] | None,
     review_threshold: int,
     backend: str,
-    llm_model: str,
+    llm_model: str | None,
     context_hint: str | None,
 ) -> None:
     """Persist the review payload next to the transcript for `polyphony serve` to consume later."""

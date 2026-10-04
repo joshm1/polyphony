@@ -25,6 +25,9 @@ import type {
   WordFlag,
 } from "./types";
 
+const NO_LLM_HINT =
+  "No LLM configured. Set an API key (e.g. $OPENAI_API_KEY) or pass --llm-model, then restart polyphony serve.";
+
 const clampConf = (c: number) => Math.max(0, Math.min(100, c));
 const confColor = (c: number) => `hsl(${(clampConf(c) * 1.2).toFixed(0)}, 70%, 50%)`;
 
@@ -679,6 +682,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       : `${focusedWordIdx + 1}/${flags.length} · ${decidedWordCount} custom decision${decidedWordCount === 1 ? "" : "s"}`;
 
   const busy = applyStatus.kind === "busy";
+  const llmReady = data.llm_model !== null;
   const actions = (
     <>
       <button
@@ -692,9 +696,13 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         type="button"
         className={`secondary${summaryOpen ? " active" : ""}`}
         onClick={() => (summary ? setSummaryOpen((o) => !o) : generateSummary(false))}
-        disabled={busy && !summary}
+        disabled={!summary && (busy || !llmReady)}
         title={
-          summary ? "Show the saved summary" : "Summarize the reviewed transcript with the LLM"
+          summary
+            ? "Show the saved summary"
+            : llmReady
+              ? "Summarize the reviewed transcript with the LLM"
+              : NO_LLM_HINT
         }
       >
         {busy && applyStatus.action === "summarize" ? "Summarizing…" : "Summary"}
@@ -832,7 +840,8 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
                   type="button"
                   className="secondary"
                   onClick={() => generateSummary(true)}
-                  disabled={busy}
+                  disabled={busy || !llmReady}
+                  title={llmReady ? undefined : NO_LLM_HINT}
                 >
                   {busy && applyStatus.action === "summarize" ? "Summarizing…" : "Regenerate"}
                 </button>
@@ -864,7 +873,8 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
               type="button"
               className="secondary"
               onClick={proposeVaultLocation}
-              disabled={busy}
+              disabled={busy || !llmReady}
+              title={llmReady ? undefined : NO_LLM_HINT}
             >
               {busy && applyStatus.action === "propose"
                 ? "Thinking…"
@@ -971,10 +981,16 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           <div className="context-row context-actions">
             <span className="hint">
               Names typed above show up immediately and are saved on Apply. Re-analyze reruns the{" "}
-              {data.llm_model} passes (speaker labels, paragraphs, word suggestions) with these
-              names and hint — about 1–2 minutes. Your overrides and corrections carry over.
+              {data.llm_model ?? "LLM"} passes (speaker labels, paragraphs, word suggestions) with
+              these names and hint — about 1–2 minutes. Your overrides and corrections carry over.
             </span>
-            <button type="button" className="primary" onClick={reanalyze} disabled={busy}>
+            <button
+              type="button"
+              className="primary"
+              onClick={reanalyze}
+              disabled={busy || !llmReady}
+              title={llmReady ? undefined : NO_LLM_HINT}
+            >
               {busy && applyStatus.action === "reanalyze" ? "Re-analyzing…" : "Re-analyze with LLM"}
             </button>
           </div>

@@ -21,7 +21,7 @@ def playground_payload(
     paragraph_breaks: list[int] | None,
     review_threshold: int,
     backend: str,
-    llm_model: str,
+    llm_model: str | None,
     context_hint: str | None,
     audio_url: str | None = None,
 ) -> dict:
