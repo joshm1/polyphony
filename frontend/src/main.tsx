@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { fetchData } from './api'
 import App from './App'
 import type { Notice, PolyphonyData } from './types'
 import './styles.css'
@@ -11,15 +12,11 @@ function Bootstrap() {
   const [data, setData] = useState<PolyphonyData | null>(null)
   // Bumped when the server returns re-analyzed data, so App remounts and re-hydrates from it.
   const [generation, setGeneration] = useState(0)
-  const [notice, setNotice] = useState<Notice | undefined>()
+  const [notice, setNotice] = useState<Notice | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/data')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<PolyphonyData>
-      })
+    fetchData()
       .then(setData)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [])

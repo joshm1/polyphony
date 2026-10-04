@@ -8,18 +8,24 @@ import {
   useRef,
   useState,
 } from 'react'
+
+import { fetchData, postJson } from './api'
+import {
+  ApplyResultSchema,
+  ReanalyzeResultSchema,
+  SummaryResultSchema,
+  VaultMoveResultSchema,
+  VaultProposalSchema,
+} from './types'
 import type {
   ApplyResult,
   Chunk,
   Notice,
   PolyphonyData,
   PopoverState,
-  ReanalyzeResult,
-  SummaryResult,
   TextToken,
   TranscriptSummary,
   Turn,
-  VaultMoveResult,
   VaultProposal,
   WordDecision,
   WordFlag,
@@ -38,10 +44,14 @@ function fmtTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const lastChunk = (turn: Turn): Chunk => turn.chunks.at(-1) ?? turn.chunks[0]
+
+const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
 interface AppProps {
   data: PolyphonyData
   // Shown once after the server replaces the data (re-analyze, vault move), since the remount resets local status.
-  notice?: Notice
+  notice: Notice | null
   onDataReplaced: (data: PolyphonyData, notice: Notice) => void
 }
 
@@ -61,15 +71,15 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
 
   // ---------- state ----------
   const [chunks] = useState<Chunk[]>(data.chunks)
-  const [flags, setFlags] = useState<WordFlag[]>([...(data.asr_flags ?? [])])
+  const [flags, setFlags] = useState<WordFlag[]>([...data.asr_flags])
   const [mode, setMode] = useState<'speakers' | 'words'>('speakers')
   const [threshold, setThreshold] = useState<number>(100)
   // Hydrated from the sidecar so a reload resumes the last applied review.
   const [overrides, setOverrides] = useState<Map<number, number>>(
-    () => new Map(Object.entries(data.review?.overrides ?? {}).map(([k, v]) => [Number(k), v]))
+    () => new Map(Object.entries(data.review.overrides).map(([k, v]) => [Number(k), v]))
   )
   const [wordDecisions, setWordDecisions] = useState<Map<number, WordDecision>>(
-    () => new Map(Object.entries(data.review?.word_decisions ?? {}).map(([k, v]) => [Number(k), v]))
+    () => new Map(Object.entries(data.review.word_decisions).map(([k, v]) => [Number(k), v]))
   )
   const [focusedWordIdx, setFocusedWordIdx] = useState<number>(flags.length > 0 ? 0 : -1)
   const [playingChunkIdx, setPlayingChunkIdx] = useState<number | null>(null)
@@ -91,14 +101,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const [vaultFolder, setVaultFolder] = useState('')
   const [vaultName, setVaultName] = useState('')
   const [vaultProposal, setVaultProposal] = useState<VaultProposal | null>(null)
-  const [popover, setPopover] = useState<PopoverState>({
-    open: false,
-    chunkIdx: null,
-    original: '',
-    value: '',
-    top: 0,
-    left: 0,
-  })
+  const [popover, setPopover] = useState<PopoverState>({ open: false })
 
   const playerRef = useRef<HTMLAudioElement | null>(null)
   const autoStopAtRef = useRef<number | null>(null)
@@ -128,8 +131,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const correctionsByChunk = useMemo(() => {
     const map = new Map<number, { original: string; replacement: string; user: boolean }[]>()
     flags.forEach((f, i) => {
-      const dec =
-        wordDecisions.get(i) ?? ({ kind: 'suggested', value: f.suggested } as WordDecision)
+      const dec = wordDecisions.get(i) ?? { kind: 'suggested', value: f.suggested }
       if (dec.kind === 'original') return
       if (!map.has(f.chunk_idx)) map.set(f.chunk_idx, [])
       map.get(f.chunk_idx)?.push({
@@ -144,10 +146,12 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const renderChunkTokens = useCallback(
     (chunk: Chunk): TextToken[] => {
       const corrections = correctionsByChunk.get(chunk.idx) ?? []
-      if (corrections.length === 0) return [{ type: 'text', value: chunk.text }]
+      if (corrections.length === 0) return [{ type: 'text', at: 0, value: chunk.text }]
       const tokens: TextToken[] = []
       let remaining = chunk.text
-      const pending = corrections.map((c) => ({ ...c }))
+      // Offset of `remaining` within chunk.text; gives each token a stable key.
+      let consumed = 0
+      const pending = [...corrections]
       while (remaining.length > 0 && pending.length > 0) {
         let bestIdx = -1
         let bestAt = Number.POSITIVE_INFINITY
@@ -159,17 +163,23 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           }
         })
         if (bestIdx < 0) break
-        const c = pending.splice(bestIdx, 1)[0]
-        if (bestAt > 0) tokens.push({ type: 'text', value: remaining.slice(0, bestAt) })
+        const [c] = pending.splice(bestIdx, 1)
+        if (!c) break
+        if (bestAt > 0) {
+          tokens.push({ type: 'text', at: consumed, value: remaining.slice(0, bestAt) })
+        }
         tokens.push({
           type: 'correction',
+          at: consumed + bestAt,
           original: c.original,
           replacement: c.replacement,
           user: c.user,
         })
-        remaining = remaining.slice(bestAt + c.original.length)
+        const advance = bestAt + c.original.length
+        remaining = remaining.slice(advance)
+        consumed += advance
       }
-      if (remaining) tokens.push({ type: 'text', value: remaining })
+      if (remaining) tokens.push({ type: 'text', at: consumed, value: remaining })
       return tokens
     },
     [correctionsByChunk]
@@ -179,7 +189,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     const result: Turn[] = []
     let cur: Turn | null = null
     for (const ch of chunks) {
-      const spk = overrides.has(ch.idx) ? (overrides.get(ch.idx) as number) : ch.final
+      const spk = overrides.get(ch.idx) ?? ch.final
       if (!cur || cur.speaker !== spk) {
         if (cur) result.push(cur)
         cur = {
@@ -206,9 +216,9 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const lowConfTurnCount = useMemo(() => turns.filter((t) => t.minConf < 70).length, [turns])
 
   const decisionOf = useCallback(
-    (i: number): WordDecision =>
-      wordDecisions.get(i) ?? { kind: 'suggested', value: flags[i].suggested },
-    [wordDecisions, flags]
+    (i: number, flag: WordFlag): WordDecision =>
+      wordDecisions.get(i) ?? { kind: 'suggested', value: flag.suggested },
+    [wordDecisions]
   )
 
   const decidedWordCount = useMemo(
@@ -236,7 +246,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   }, [])
 
   const chooseSuggested = useCallback(
-    (i: number) => chooseDecision(i, 'suggested', flags[i].suggested),
+    (i: number) => {
+      const flag = flags[i]
+      if (flag) chooseDecision(i, 'suggested', flag.suggested)
+    },
     [chooseDecision, flags]
   )
   const chooseAlternative = useCallback(
@@ -244,7 +257,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     [chooseDecision]
   )
   const keepOriginal = useCallback(
-    (i: number) => chooseDecision(i, 'original', flags[i].original),
+    (i: number) => {
+      const flag = flags[i]
+      if (flag) chooseDecision(i, 'original', flag.original)
+    },
     [chooseDecision, flags]
   )
 
@@ -261,7 +277,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       setPlayingChunkIdx(chunk.idx)
       autoStopAtRef.current = untilEnd && chunk.end > chunk.start ? chunk.end + 0.2 : null
       playerRef.current.currentTime = Math.max(0, chunk.start - 0.1)
-      playerRef.current.play()
+      void playerRef.current.play()
     },
     [audioUrl]
   )
@@ -270,7 +286,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     (turn: Turn) => {
       if (!audioUrl) return
       playFromChunk(turn.chunks[0], { untilEnd: false })
-      autoStopAtRef.current = turn.chunks[turn.chunks.length - 1].end + 0.2
+      autoStopAtRef.current = lastChunk(turn).end + 0.2
     },
     [audioUrl, playFromChunk]
   )
@@ -301,7 +317,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     if (!el) return
     if (el.paused) {
       autoStopAtRef.current = null
-      el.play()
+      void el.play()
     } else {
       el.pause()
     }
@@ -330,10 +346,11 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       const selected = sel.toString().trim()
       if (!selected) return
       const container = range.commonAncestorContainer
-      const parentEl = container.nodeType === 1 ? (container as Element) : container.parentElement
+      const parentEl = container instanceof Element ? container : container.parentElement
       const textEl = parentEl?.closest<HTMLElement>('.text[data-chunk-idx]')
-      if (!textEl?.dataset.chunkIdx) return
-      const chunkIdx = Number.parseInt(textEl.dataset.chunkIdx, 10)
+      const rawChunkIdx = textEl?.dataset['chunkIdx']
+      if (!rawChunkIdx) return
+      const chunkIdx = Number.parseInt(rawChunkIdx, 10)
       const chunk = chunkById(chunkIdx)
       if (!chunk || !chunk.text.includes(selected)) return
       const rect = range.getBoundingClientRect()
@@ -349,15 +366,15 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     }, 10)
   }, [chunkById])
 
-  const cancelPopover = useCallback(() => setPopover((p) => ({ ...p, open: false })), [])
+  const cancelPopover = useCallback(() => setPopover({ open: false }), [])
 
   const acceptPopover = useCallback(() => {
     setPopover((p) => {
       if (!p.open) return p
       const replacement = p.value.trim()
-      if (!replacement || replacement === p.original) return { ...p, open: false }
+      if (!replacement || replacement === p.original) return { open: false }
       const newFlag: WordFlag = {
-        chunk_idx: p.chunkIdx as number,
+        chunk_idx: p.chunkIdx,
         original: p.original,
         suggested: replacement,
         alternatives: [],
@@ -375,7 +392,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         return next
       })
       window.getSelection()?.removeAllRanges()
-      return { ...p, open: false }
+      return { open: false }
     })
   }, [])
 
@@ -395,10 +412,9 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
 
   // Close popover on outside click.
   useEffect(() => {
-    if (!popover.open) return
+    if (!popover.open) return undefined
     const onDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target?.closest('.word-popover')) return
+      if (e.target instanceof Element && e.target.closest('.word-popover')) return
       cancelPopover()
     }
     document.addEventListener('mousedown', onDown)
@@ -409,8 +425,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement | null
-      if (active?.tagName === 'INPUT') return
+      if (document.activeElement?.tagName === 'INPUT') return
 
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -420,7 +435,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       if (audioUrl && e.key === ' ') {
         e.preventDefault()
         if (playerRef.current) {
-          if (playerRef.current.paused) playerRef.current.play()
+          if (playerRef.current.paused) void playerRef.current.play()
           else playerRef.current.pause()
         }
         return
@@ -439,7 +454,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       } else if (e.key === 'p' && audioUrl) {
         e.preventDefault()
         const f = flags[focusedWordIdx]
-        const ch = chunkById(f.chunk_idx)
+        const ch = f && chunkById(f.chunk_idx)
         if (ch) playFromChunk(ch)
       } else if (e.key === 'a' || e.key === 'Enter') {
         e.preventDefault()
@@ -451,10 +466,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
         advanceFocus()
       } else if (/^[1-9]$/.test(e.key)) {
         e.preventDefault()
-        const f = flags[focusedWordIdx]
         const n = Number.parseInt(e.key, 10)
+        const alt = flags[focusedWordIdx]?.alternatives[n - 2]
         if (n === 1) chooseSuggested(focusedWordIdx)
-        else if (f.alternatives[n - 2]) chooseAlternative(focusedWordIdx, f.alternatives[n - 2])
+        else if (alt) chooseAlternative(focusedWordIdx, alt)
         else return
         advanceFocus()
       }
@@ -474,26 +489,22 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     playFromChunk,
   ])
 
-  // Scroll focused card into view when it changes. The effect body
-  // doesn't literally read focusedWordIdx (it just queries the DOM), but
-  // we want it to fire exactly when focus changes — so keep the dep.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: focusedWordIdx is the trigger, not a value read in the body
-  useEffect(() => {
-    if (mode !== 'words') return
-    const el = document.querySelector<HTMLElement>('.word-card.focused')
+  // Attached only to the focused word card, so React calls it whenever focus moves to another
+  // card or the Words view mounts; a stable identity keeps re-renders from re-scrolling.
+  const scrollIntoViewRef = useCallback((el: HTMLDivElement | null) => {
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [mode, focusedWordIdx])
+  }, [])
 
   // ---------- apply prompt ----------
 
   const buildApplyPrompt = useCallback((): string => {
     const overrideList = Array.from(overrides.entries())
-      .sort(([a], [b]) => a - b)
+      .toSorted(([a], [b]) => a - b)
       .map(([idx, spk]) => `- chunk ${idx} → speaker ${spk} (${speakerName(spk)})`)
 
     const wordCorrections: string[] = []
     flags.forEach((f, i) => {
-      const d = wordDecisions.get(i) ?? ({ kind: 'suggested', value: f.suggested } as WordDecision)
+      const d = wordDecisions.get(i) ?? { kind: 'suggested', value: f.suggested }
       if (d.kind === 'original') return
       const suffix = d.kind === 'suggested' ? ' (default suggestion)' : ''
       wordCorrections.push(`- chunk ${f.chunk_idx}: "${f.original}" → "${d.value}"${suffix}`)
@@ -548,73 +559,68 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
     [overrides, flags, wordDecisions, names]
   )
 
-  const postJson = useCallback(async <T,>(url: string, body: unknown): Promise<T> => {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`)
-    return (await r.json()) as T
-  }, [])
-
   const applyReview = useCallback(async () => {
     setApplyStatus({ kind: 'busy', action: 'apply' })
     try {
-      const result = await postJson<ApplyResult>('/api/apply', reviewState())
+      const result = await postJson('/api/apply', reviewState(), ApplyResultSchema)
       setApplyStatus({ kind: 'done', message: describeResult(result) })
     } catch (e: unknown) {
-      setApplyStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+      setApplyStatus({ kind: 'error', message: errorMessage(e) })
     }
-  }, [postJson, reviewState])
+  }, [reviewState])
 
   const reanalyze = useCallback(async () => {
     setApplyStatus({ kind: 'busy', action: 'reanalyze' })
     try {
-      const result = await postJson<ReanalyzeResult>('/api/reanalyze', {
-        ...reviewState(),
-        candidate_names: candidateNames.split(','),
-        context_hint: contextHint,
-      })
+      const result = await postJson(
+        '/api/reanalyze',
+        {
+          ...reviewState(),
+          candidate_names: candidateNames.split(','),
+          context_hint: contextHint,
+        },
+        ReanalyzeResultSchema
+      )
       onDataReplaced(
         { ...result.data, audio_url: audioUrl },
         { message: `Re-analyzed · ${describeResult(result)}` }
       )
     } catch (e: unknown) {
-      setApplyStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+      setApplyStatus({ kind: 'error', message: errorMessage(e) })
     }
-  }, [postJson, reviewState, candidateNames, contextHint, onDataReplaced, audioUrl])
+  }, [reviewState, candidateNames, contextHint, onDataReplaced, audioUrl])
 
   const proposeVaultLocation = useCallback(async () => {
     setApplyStatus({ kind: 'busy', action: 'propose' })
     try {
-      const proposal = await postJson<VaultProposal>('/api/vault/propose', reviewState())
+      const proposal = await postJson('/api/vault/propose', reviewState(), VaultProposalSchema)
       setVaultProposal(proposal)
       setVaultFolder(proposal.folder)
       setVaultName(proposal.basename)
       setApplyStatus({ kind: 'idle' })
     } catch (e: unknown) {
-      setApplyStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+      setApplyStatus({ kind: 'error', message: errorMessage(e) })
     }
-  }, [postJson, reviewState])
+  }, [reviewState])
 
   const generateSummary = useCallback(
     async (regenerate: boolean) => {
       setSummaryOpen(true)
       setApplyStatus({ kind: 'busy', action: 'summarize' })
       try {
-        const result = await postJson<SummaryResult>('/api/summary', {
-          ...reviewState(),
-          regenerate,
-        })
+        const result = await postJson(
+          '/api/summary',
+          { ...reviewState(), regenerate },
+          SummaryResultSchema
+        )
         setSummary(result.summary)
         setSummaryStale(result.summary_stale)
         setApplyStatus({ kind: 'idle' })
       } catch (e: unknown) {
-        setApplyStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+        setApplyStatus({ kind: 'error', message: errorMessage(e) })
       }
     },
-    [postJson, reviewState]
+    [reviewState]
   )
 
   // Until the recording has its own folder in the vault, Apply files it there (after confirming the location).
@@ -627,22 +633,26 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
   const moveToVault = useCallback(async () => {
     setApplyStatus({ kind: 'busy', action: 'move' })
     try {
-      const result = await postJson<VaultMoveResult>('/api/vault/move', {
-        ...reviewState(),
-        folder: vaultFolder,
-        basename: vaultName,
-      })
-      const r = await fetch('/api/data')
-      if (!r.ok) throw new Error(`Moved, but reloading data failed: HTTP ${r.status}`)
-      onDataReplaced((await r.json()) as PolyphonyData, {
+      const result = await postJson(
+        '/api/vault/move',
+        { ...reviewState(), folder: vaultFolder, basename: vaultName },
+        VaultMoveResultSchema
+      )
+      let next: PolyphonyData
+      try {
+        next = await fetchData()
+      } catch (e: unknown) {
+        throw new Error(`Moved, but reloading data failed: ${errorMessage(e)}`, { cause: e })
+      }
+      onDataReplaced(next, {
         message: `Moved ${result.moved.length} files → ${result.note_path}`,
         href: result.obsidian_url,
         linkText: 'Open in Obsidian',
       })
     } catch (e: unknown) {
-      setApplyStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+      setApplyStatus({ kind: 'error', message: errorMessage(e) })
     }
-  }, [postJson, reviewState, vaultFolder, vaultName, onDataReplaced])
+  }, [reviewState, vaultFolder, vaultName, onDataReplaced])
 
   // ---------- keyhint bar ----------
 
@@ -691,7 +701,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       <button
         type="button"
         className={`secondary${summaryOpen ? ' active' : ''}`}
-        onClick={() => (summary ? setSummaryOpen((o) => !o) : generateSummary(false))}
+        onClick={() => {
+          if (summary) setSummaryOpen((o) => !o)
+          else void generateSummary(false)
+        }}
         disabled={!summary && (busy || !llmReady)}
         title={
           summary
@@ -716,7 +729,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       <button
         type="button"
         className="primary"
-        onClick={needsFiling ? openFiling : applyReview}
+        onClick={() => {
+          if (needsFiling) openFiling()
+          else void applyReview()
+        }}
         disabled={busy}
         title={
           needsFiling
@@ -726,7 +742,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
       >
         {busy && applyStatus.action === 'apply' ? 'Applying…' : 'Apply'}
       </button>
-      <button type="button" className="secondary" onClick={copyApplyPrompt}>
+      <button type="button" className="secondary" onClick={() => void copyApplyPrompt()}>
         Copy apply prompt
       </button>
       <span className={`copy-status${copyStatus ? ' visible' : ''}`}>Copied!</span>
@@ -835,7 +851,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => generateSummary(true)}
+                  onClick={() => void generateSummary(true)}
                   disabled={busy || !llmReady}
                   title={llmReady ? undefined : NO_LLM_HINT}
                 >
@@ -868,7 +884,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
             <button
               type="button"
               className="secondary"
-              onClick={proposeVaultLocation}
+              onClick={() => void proposeVaultLocation()}
               disabled={busy || !llmReady}
               title={llmReady ? undefined : NO_LLM_HINT}
             >
@@ -916,13 +932,18 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           <div className="context-row context-actions">
             <span />
             <div className="button-group">
-              <button type="button" className="secondary" onClick={applyReview} disabled={busy}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void applyReview()}
+                disabled={busy}
+              >
                 Apply without moving
               </button>
               <button
                 type="button"
                 className="primary"
-                onClick={moveToVault}
+                onClick={() => void moveToVault()}
                 disabled={busy || !vaultFolder.trim() || !vaultName.trim()}
               >
                 {busy && applyStatus.action === 'move' ? 'Applying…' : 'Apply & move'}
@@ -983,7 +1004,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
             <button
               type="button"
               className="primary"
-              onClick={reanalyze}
+              onClick={() => void reanalyze()}
               disabled={busy || !llmReady}
               title={llmReady ? undefined : NO_LLM_HINT}
             >
@@ -998,7 +1019,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           <div onMouseUp={onMouseupSpeakers}>
             {visibleTurns.map((turn) => {
               const first = turn.chunks[0]
-              const last = turn.chunks[turn.chunks.length - 1]
+              const last = lastChunk(turn)
               const isPlaying = turn.chunks.some((c) => c.idx === playingChunkIdx)
               return (
                 <div
@@ -1050,13 +1071,11 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
                       }
                     >
                       <div className="text" data-chunk-idx={ch.idx}>
-                        {renderChunkTokens(ch).map((tok, i) =>
+                        {renderChunkTokens(ch).map((tok) =>
                           tok.type === 'text' ? (
-                            // biome-ignore lint/suspicious/noArrayIndexKey: token list is rebuilt atomically
-                            <span key={i}>{tok.value}</span>
+                            <span key={`text-${tok.at}`}>{tok.value}</span>
                           ) : (
-                            // biome-ignore lint/suspicious/noArrayIndexKey: token list is rebuilt atomically
-                            <span key={i}>
+                            <span key={`correction-${tok.at}`}>
                               <span className="correction-orig">{tok.original}</span>
                               <span className="correction-arrow">→</span>
                               <span className={`correction-new${tok.user ? ' user' : ''}`}>
@@ -1077,9 +1096,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
                       </div>
                       <div className="actions">
                         {Array.from({ length: totalSpeakers }, (_, k) => k + 1).map((s) => {
-                          const current = overrides.has(ch.idx)
-                            ? (overrides.get(ch.idx) as number)
-                            : ch.final
+                          const current = overrides.get(ch.idx) ?? ch.final
                           return (
                             <button
                               type="button"
@@ -1113,7 +1130,7 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
               <div className="empty">No suspected ASR errors flagged. 🎉</div>
             ) : (
               flags.map((flag, i) => {
-                const dec = decisionOf(i)
+                const dec = decisionOf(i, flag)
                 const chunk = chunkById(flag.chunk_idx)
                 const ctxBefore = chunk?.text.includes(flag.original)
                   ? chunk.text.split(flag.original)[0]
@@ -1131,7 +1148,8 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
                     key={cardKey}
                     className={`word-card${i === focusedWordIdx ? ' focused' : ''}${dec.kind === 'original' ? ' resolved' : ''}${isPlaying ? ' now-playing' : ''}`}
                     data-word-chunk={flag.chunk_idx}
-                    // biome-ignore lint/a11y/useSemanticElements: the card contains nested buttons + inputs; wrapping it in a real <button> produces invalid HTML (interactive elements can't nest). div + role=button is the correct ARIA pattern here.
+                    ref={i === focusedWordIdx ? scrollIntoViewRef : undefined}
+                    // Not a real <button>: the card nests buttons and inputs, which a <button> can't contain.
                     role="button"
                     tabIndex={0}
                     onClick={() => setFocusedWordIdx(i)}
@@ -1280,10 +1298,9 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
           </>
         )}
         <div className="keybar">
-          {keyhint.map((h, i) => (
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: hint strings are code-generated
-            // biome-ignore lint/suspicious/noArrayIndexKey: static array
-            <span key={i} dangerouslySetInnerHTML={{ __html: h }} />
+          {keyhint.map((h) => (
+            // Hint strings are hard-coded above, never user input.
+            <span key={h} dangerouslySetInnerHTML={{ __html: h }} />
           ))}
         </div>
       </div>
@@ -1297,7 +1314,10 @@ export default function App({ data, notice, onDataReplaced }: AppProps) {
             ref={popoverInputRef}
             type="text"
             value={popover.value}
-            onChange={(e) => setPopover((p) => ({ ...p, value: e.target.value }))}
+            onChange={(e) => {
+              const value = e.target.value
+              setPopover((p) => (p.open ? { ...p, value } : p))
+            }}
             onKeyDown={onPopoverKeydown}
             spellCheck
             autoComplete="off"
