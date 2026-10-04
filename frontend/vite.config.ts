@@ -22,9 +22,6 @@ export default defineConfig({
         assetFileNames: 'assets/[name][extname]',
       },
     },
-    // Source maps land next to the built files — handy when debugging a
-    // deployed playground without re-installing Node.
-    sourcemap: true,
     minify: true,
     // The CSS is small; keep it readable so committed-bundle diffs are reviewable.
     cssMinify: false,

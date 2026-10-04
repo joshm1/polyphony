@@ -3,7 +3,8 @@ name = "polyphony"
 version = "0.1.0"
 description = "Diarization you can audit: speaker-attributed transcripts with per-chunk confidence, a review UI to correct them, and exports of the corrected data."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Josh McDade", email = "josh.ncsu@gmail.com" }
 ]
@@ -18,7 +19,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -55,7 +55,7 @@ Issues = "https://github.com/joshm1/polyphony/issues"
 polyphony = "polyphony.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.9.28,<0.10.0"]
+requires = ["uv_build>=0.11.32,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
