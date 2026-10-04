@@ -1,0 +1,61 @@
+.github/workflows/ci.yml
+  s_f8085f54f26712::t_9cd1504516f384 49-53,55,57,59
+.pre-commit-config.yaml
+  s_f8085f54f26712::t_5c6c188b5544bd 47-48,50,54-57,59,68
+AGENTS.md
+  s_eb84a2012b5260::t_cef48c05983187 23,28-31,36-49
+frontend/.oxfmtrc.json
+  s_cbfcdb868fdfc8::t_e9823bb10c83ac 1-10
+frontend/.oxlintrc.json
+  s_cbfcdb868fdfc8::t_92e92891398ad8 1-153
+frontend/bun.lock
+  s_cbfcdb868fdfc8::t_f629ac7a1a845b 15-18,23-25,121-208,277-316,357-362,381-383
+frontend/package.json
+  s_cbfcdb868fdfc8::t_8c40eef33c9ed4 10-13,23-26
+frontend/tsconfig.base.json
+  s_cbfcdb868fdfc8::t_722f7aaa4ee86c 1-30
+frontend/tsconfig.json
+  s_1f2acbbfffe659::t_01e78219f2c388 2,4
+frontend/tsconfig.node.json
+  s_1f2acbbfffe659::t_86a117f09b9950 2-5,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1de1dddfc6950b9ccc07e4d205e7b674ecabad93",
+  "prompts": {},
+  "sessions": {
+    "s_1f2acbbfffe659": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f65fdd27-91d5-4935-8810-e0abb4f8fb17",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    },
+    "s_cbfcdb868fdfc8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497b2146-fce3-4ab4-9fdf-ce17f4d109d8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    },
+    "s_eb84a2012b5260": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f006e879-5a34-4e22-8625-5d9196cda528",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    },
+    "s_f8085f54f26712": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71d64fcb-1209-4959-8732-2e5d09a86ed1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
