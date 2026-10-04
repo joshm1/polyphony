@@ -2,122 +2,122 @@
 // Must stay in sync with `polyphony.playground.playground_payload` in Python.
 
 export interface Chunk {
-  idx: number;
-  start: number;
-  end: number;
-  text: string;
-  audio: number | null;
-  llm: number | null;
-  final: number;
-  confidence: number;
-  note: string;
-  audio_purity?: number | null; // pyannote only; absent in older sidecars
+  idx: number
+  start: number
+  end: number
+  text: string
+  audio: number | null
+  llm: number | null
+  final: number
+  confidence: number
+  note: string
+  audio_purity?: number | null // pyannote only; absent in older sidecars
 }
 
 export interface WordFlag {
-  chunk_idx: number;
-  original: string;
-  suggested: string;
-  alternatives: string[];
-  confidence: number;
-  reason: string;
-  userAdded?: boolean;
+  chunk_idx: number
+  original: string
+  suggested: string
+  alternatives: string[]
+  confidence: number
+  reason: string
+  userAdded?: boolean
 }
 
 export interface ReviewState {
-  overrides: Record<string, number>; // chunk idx → speaker id
-  word_decisions: Record<string, WordDecision>; // asr_flags index → decision
+  overrides: Record<string, number> // chunk idx → speaker id
+  word_decisions: Record<string, WordDecision> // asr_flags index → decision
 }
 
 export interface PolyphonyData {
-  audio: string;
-  audio_url: string | null;
-  transcript_path: string;
-  names: string[]; // indexed by speaker id - 1; "" = unnamed
-  review_threshold: number;
-  backend: string;
-  llm_model: string | null; // null = no LLM configured; LLM-only actions are disabled
-  context_hint: string | null;
-  vault: string | null; // injected by the server; null when no vault is configured
-  filed: boolean; // the recording already sits in its own folder inside the vault
-  summary?: TranscriptSummary | null;
-  summary_stale: boolean; // the reviewed transcript changed since the summary was generated
-  paragraph_breaks: number[] | null;
-  review: ReviewState;
-  chunks: Chunk[];
-  asr_flags: WordFlag[];
+  audio: string
+  audio_url: string | null
+  transcript_path: string
+  names: string[] // indexed by speaker id - 1; "" = unnamed
+  review_threshold: number
+  backend: string
+  llm_model: string | null // null = no LLM configured; LLM-only actions are disabled
+  context_hint: string | null
+  vault: string | null // injected by the server; null when no vault is configured
+  filed: boolean // the recording already sits in its own folder inside the vault
+  summary?: TranscriptSummary | null
+  summary_stale: boolean // the reviewed transcript changed since the summary was generated
+  paragraph_breaks: number[] | null
+  review: ReviewState
+  chunks: Chunk[]
+  asr_flags: WordFlag[]
 }
 
 export interface ApplyResult {
-  reviewed_path: string;
-  skipped: { chunk_idx: number; original: string }[];
+  reviewed_path: string
+  skipped: { chunk_idx: number; original: string }[]
 }
 
 export interface ReanalyzeResult extends ApplyResult {
-  data: PolyphonyData;
+  data: PolyphonyData
 }
 
 export interface TranscriptSummary {
-  tldr: string;
-  key_points: string[];
-  decisions: string[];
-  action_items: { owner: string | null; task: string }[];
-  model: string;
-  created_at: string;
+  tldr: string
+  key_points: string[]
+  decisions: string[]
+  action_items: { owner: string | null; task: string }[]
+  model: string
+  created_at: string
 }
 
 export interface SummaryResult {
-  summary: TranscriptSummary;
-  summary_stale: boolean;
+  summary: TranscriptSummary
+  summary_stale: boolean
 }
 
 export interface VaultProposal {
-  folder: string;
-  basename: string;
-  reason: string;
-  files: string[];
+  folder: string
+  basename: string
+  reason: string
+  files: string[]
 }
 
 export interface VaultMoveResult {
-  moved: string[];
-  note_path: string;
-  obsidian_url: string;
+  moved: string[]
+  note_path: string
+  obsidian_url: string
 }
 
 // A status line that survives App remounting after the server replaces the data.
 export interface Notice {
-  message: string;
-  href?: string;
-  linkText?: string;
+  message: string
+  href?: string
+  linkText?: string
 }
 
-export type WordDecisionKind = "suggested" | "alternative" | "custom" | "original";
+export type WordDecisionKind = 'suggested' | 'alternative' | 'custom' | 'original'
 
 export interface WordDecision {
-  kind: WordDecisionKind;
-  value: string;
+  kind: WordDecisionKind
+  value: string
 }
 
 export interface TextToken {
-  type: "text" | "correction";
-  value?: string;
-  original?: string;
-  replacement?: string;
-  user?: boolean;
+  type: 'text' | 'correction'
+  value?: string
+  original?: string
+  replacement?: string
+  user?: boolean
 }
 
 export interface Turn {
-  speaker: number;
-  chunks: Chunk[];
-  minConf: number;
-  overridden: boolean;
+  speaker: number
+  chunks: Chunk[]
+  minConf: number
+  overridden: boolean
 }
 
 export interface PopoverState {
-  open: boolean;
-  chunkIdx: number | null;
-  original: string;
-  value: string;
-  top: number;
-  left: number;
+  open: boolean
+  chunkIdx: number | null
+  original: string
+  value: string
+  top: number
+  left: number
 }

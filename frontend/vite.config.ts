@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
 // Vite builds the React app into `../src/polyphony/static/`, which is
 // committed to the repo. At runtime Python's FastAPI server:
@@ -10,16 +10,16 @@ import react from "@vitejs/plugin-react";
 // reference `/assets/main.js` + `/assets/main.css` without manifest lookups.
 export default defineConfig({
   plugins: [react()],
-  root: ".",
-  base: "/",
+  root: '.',
+  base: '/',
   build: {
-    outDir: "../src/polyphony/static",
+    outDir: '../src/polyphony/static',
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        entryFileNames: "assets/main.js",
-        chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/[name][extname]",
+        entryFileNames: 'assets/main.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]',
       },
     },
     // Source maps land next to the built files — handy when debugging a
@@ -28,13 +28,13 @@ export default defineConfig({
     minify: true,
     // The CSS is small; keep it readable so committed-bundle diffs are reviewable.
     cssMinify: false,
-    target: "es2020",
+    target: 'es2020',
   },
   server: {
     // During `vite dev`, proxy API + static-file requests to the Python
     // backend so the React app can reuse the same contract as production.
     proxy: {
-      "/api": "http://localhost:8787",
+      '/api': 'http://localhost:8787',
     },
   },
-});
+})
