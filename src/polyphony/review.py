@@ -74,6 +74,7 @@ def labels_from_payload(data: dict[str, Any]) -> list[ChunkLabel]:
             final=c["final"],
             confidence=c["confidence"],
             note=c.get("note", ""),
+            audio_purity=c.get("audio_purity"),
         )
         for c in data["chunks"]
     ]

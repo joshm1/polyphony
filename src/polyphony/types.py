@@ -43,6 +43,9 @@ class ChunkLabel:
     note: str = ""
     # User override applied post-hoc via the review playground.
     override: int | None = None
+    # Share of the chunk's speech owned by the audio diarizer's majority speaker (pyannote only).
+    # Stored so re-reconciling later (re-analysis) scores single-signal chunks the same way.
+    audio_purity: float | None = None
 
     @property
     def effective_speaker(self) -> int:

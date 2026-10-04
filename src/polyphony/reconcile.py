@@ -90,7 +90,11 @@ def reconcile(
         else:
             labels[i] = ChunkLabel(ch, a, t, final=dec.speaker, confidence=dec.confidence, note=dec.reason)
 
-    return [labels[i] for i in range(len(chunks))]
+    out = [labels[i] for i in range(len(chunks))]
+    if audio_purity is not None:
+        for lbl, purity in zip(out, audio_purity, strict=True):
+            lbl.audio_purity = purity
+    return out
 
 
 def single_signal_confidence(purity: float | None) -> int:

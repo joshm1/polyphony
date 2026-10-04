@@ -58,6 +58,7 @@ def playground_payload(
                 "final": lbl.final,
                 "confidence": lbl.confidence,
                 "note": lbl.note,
+                "audio_purity": None if lbl.audio_purity is None else round(lbl.audio_purity, 3),
             }
             for lbl in labels
         ],

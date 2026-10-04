@@ -147,44 +147,39 @@ def _run_pyannote(audio_path: Path, device: str, source_audio: Path | None = Non
     return segments
 
 
-def pyannote_per_chunk_labels(chunks: list[Chunk], segments: list[PyannoteSegment]) -> list[int | None]:
-    """Assign each chunk the pyannote speaker it overlaps most with (1-indexed)."""
-    if not segments:
-        return [None] * len(chunks)
-
-    # Stable speaker id: first-appearance order → 1, 2, 3, …
-    order: list[str] = []
+def _speech_by_speaker(chunk: Chunk, segments: list[PyannoteSegment]) -> dict[str, float]:
+    """Seconds of the chunk each pyannote speaker overlaps, in first-overlap order."""
+    by_speaker: dict[str, float] = {}
     for seg in segments:
-        if seg.speaker not in order:
-            order.append(seg.speaker)
-    label_of = {name: i + 1 for i, name in enumerate(order)}
+        overlap = min(chunk.end, seg.end) - max(chunk.start, seg.start)
+        if overlap > 0:
+            by_speaker[seg.speaker] = by_speaker.get(seg.speaker, 0.0) + overlap
+    return by_speaker
+
+
+def pyannote_per_chunk_labels(chunks: list[Chunk], segments: list[PyannoteSegment]) -> list[int | None]:
+    """Assign each chunk the pyannote speaker with the most total speech in it (1-indexed)."""
+    # Stable speaker id: first-appearance order → 1, 2, 3, …
+    label_of: dict[str, int] = {}
+    for seg in segments:
+        label_of.setdefault(seg.speaker, len(label_of) + 1)
 
     labels: list[int | None] = []
     for ch in chunks:
-        best_label: str | None = None
-        best_overlap = 0.0
-        for seg in segments:
-            overlap = max(0.0, min(ch.end, seg.end) - max(ch.start, seg.start))
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_label = seg.speaker
-        labels.append(label_of[best_label] if best_label else None)
+        by_speaker = _speech_by_speaker(ch, segments)
+        labels.append(label_of[max(by_speaker, key=by_speaker.__getitem__)] if by_speaker else None)
     return labels
 
 
 def pyannote_chunk_purity(chunks: list[Chunk], segments: list[PyannoteSegment]) -> list[float | None]:
-    """Share of each chunk's speech time that belongs to its majority speaker (None = no speech overlap).
+    """Share of each chunk's speech owned by its labeled (majority) speaker; None = no speech overlap.
 
     A chunk straddling a speaker change scores well below 1.0, which makes it
     a single-signal confidence cue when there's no second diarizer to compare against.
     """
     purity: list[float | None] = []
     for ch in chunks:
-        by_speaker: dict[str, float] = {}
-        for seg in segments:
-            overlap = min(ch.end, seg.end) - max(ch.start, seg.start)
-            if overlap > 0:
-                by_speaker[seg.speaker] = by_speaker.get(seg.speaker, 0.0) + overlap
+        by_speaker = _speech_by_speaker(ch, segments)
         total = sum(by_speaker.values())
         purity.append(max(by_speaker.values()) / total if total > 0 else None)
     return purity

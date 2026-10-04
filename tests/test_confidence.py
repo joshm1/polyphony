@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from polyphony.backends.assemblyai import Word, words_to_chunks
-from polyphony.diarize import _SpeakerAssignment, _SpeakerAssignments, diarize_llm, pyannote_chunk_purity
+from polyphony.diarize import (
+    _SpeakerAssignment,
+    _SpeakerAssignments,
+    diarize_llm,
+    pyannote_chunk_purity,
+    pyannote_per_chunk_labels,
+)
 from polyphony.playground import playground_payload
 from polyphony.reconcile import (
     AGREED_CONFIDENCE,
@@ -20,7 +27,7 @@ from polyphony.reconcile import (
     reconcile,
     single_signal_confidence,
 )
-from polyphony.review import apply_review
+from polyphony.review import apply_review, labels_from_payload
 from polyphony.transcript import build_transcript
 from polyphony.types import Chunk, PyannoteSegment
 
@@ -184,7 +191,7 @@ def test_pipeline_flags_disputed_turns_and_review_clears_them(monkeypatch: pytes
         labels=labels,
         names=names,
         audio_name="a.m4a",
-        transcript_path=__import__("pathlib").Path("a.md"),
+        transcript_path=Path("a.md"),
         asr_flags=[],
         paragraph_breaks=None,
         review_threshold=70,
@@ -207,3 +214,36 @@ def test_pipeline_without_llm_still_produces_reviewable_output(monkeypatch: pyte
     assert {lbl.confidence for lbl in labels} == {SINGLE_SIGNAL_CONFIDENCE}
     # A stricter threshold flags every single-signal turn for review.
     assert build_transcript(labels, None, review_threshold=80).count("⚠️") == 4
+
+
+def test_label_and_purity_agree_on_the_majority_speaker():
+    # A has the single longest segment, but B has more speech in total: B is the label, and purity is B's share.
+    segments = [
+        PyannoteSegment(0.0, 2.0, "A"),
+        PyannoteSegment(2.0, 3.5, "B"),
+        PyannoteSegment(3.5, 5.0, "B"),
+    ]
+    chunk = [_ch(0, 0.0, 5.0)]
+    assert pyannote_per_chunk_labels(chunk, segments) == [2]
+    assert pyannote_chunk_purity(chunk, segments) == [0.6]
+
+
+def test_reanalysis_keeps_purity_through_the_sidecar(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("polyphony.diarize.run_structured", _no_llm_calls)
+    labels = reconcile([_ch(0, 0, 1)], [1], [None], None, model=None, audio_purity=[0.5])
+    payload = playground_payload(
+        labels=labels,
+        names=[],
+        audio_name="a.m4a",
+        transcript_path=Path("a.md"),
+        asr_flags=[],
+        paragraph_breaks=None,
+        review_threshold=70,
+        backend="local",
+        llm_model=None,
+        context_hint=None,
+    )
+    restored = labels_from_payload(payload)
+    purity = [lbl.audio_purity for lbl in restored]
+    again = reconcile([lbl.chunk for lbl in restored], [1], [None], None, model=None, audio_purity=purity)
+    assert again[0].confidence == labels[0].confidence == 35

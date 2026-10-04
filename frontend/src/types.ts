@@ -11,6 +11,7 @@ export interface Chunk {
   final: number;
   confidence: number;
   note: string;
+  audio_purity?: number | null; // pyannote only; absent in older sidecars
 }
 
 export interface WordFlag {
