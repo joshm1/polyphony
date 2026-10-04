@@ -1,0 +1,30 @@
+src/polyphony/reanalyze.py
+  s_a72c7666b25d63::t_096ee4f0b65187 73,75-78,94,109
+  s_a72c7666b25d63::t_880bc97032e749 95-96
+src/polyphony/serve.py
+  s_a72c7666b25d63::t_375394589b27c6 37,120,122,141-144,162-163,170,175,257,259,345-363
+  s_a72c7666b25d63::t_af3970c5eef36e 364-365
+src/polyphony/cli.py
+  s_a72c7666b25d63::t_375394589b27c6 271,313
+  s_a72c7666b25d63::t_880bc97032e749 108-109
+  s_a72c7666b25d63::t_7abee0048d796c 22,25
+tests/test_llm.py
+  s_a72c7666b25d63::t_a793685a49380c 63
+  s_a72c7666b25d63::t_b30d24614b12c9 57-62,64-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "9b317da42c1819a7c7e9988cf024e1622c799fb3",
+  "prompts": {},
+  "sessions": {
+    "s_a72c7666b25d63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "541042ad-9179-4636-ae9f-db0c9fb0ec04",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
