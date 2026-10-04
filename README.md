@@ -1,232 +1,175 @@
 # polyphony
 
-Audio → multi-speaker transcript with **ensemble diarization**, per-chunk confidence scores, and an interactive HTML review playground.
+**Diarization you can audit.** polyphony turns a recording into a speaker-attributed transcript where every chunk carries a 0–100 confidence score and the reason behind it. You review the doubtful parts in a browser with the audio one click away, fix speakers and misheard words, and export the corrected data as JSON, CSV, SRT, WebVTT, or markdown.
 
-**Your choice of where audio goes.** The `local` backend never sends audio off your machine — only transcript text goes to the LLM for the text-side passes. The `gemini` backend talks to your own GCP project; the `assemblyai` backend uploads audio to AssemblyAI. Built for people who want a transcript of a private conversation and control over who sees it.
+Most transcription tools hand you a confident-looking transcript and leave you to find the mistakes. polyphony shows you where it isn't sure, so a misattributed quote doesn't make it into a story, a paper, or your show notes.
 
-Three backends, one pipeline:
+Built for:
 
-- **`local`** — Whisper + pyannote + LLM diarize + reconciler. Slow, audio stays local, most robust. Two independent diarization signals (audio-based and text-based) get reconciled by a third pass that emits per-chunk 0–100 confidence.
-- **`assemblyai`** — AssemblyAI hosted ASR + voice diarization, cross-checked by the same LLM diarize + reconciler ensemble. Fast (~2 min for 20 min of audio), no Whisper/pyannote/HF token; needs `$ASSEMBLYAI_API_KEY`.
-- **`gemini`** — one Gemini 2.5 call on Vertex AI does ASR and speaker attribution at once. Fast, cheap, needs ADC.
-
-Why the ensemble: pyannote is excellent at voice changes but struggles with short interjections; LLM diarization is excellent at role cues ("so tell me about your background…") but blind to actual voice. Combine them and the disagreements are exactly the chunks worth flagging for human review.
+- **Journalists** checking who actually said a quote before it runs.
+- **Researchers** coding interviews, who need corrected, per-utterance data in a spreadsheet.
+- **Podcasters** who want accurate speaker-labeled captions and show notes.
 
 ---
 
-## Demo
+## Per-chunk confidence
 
-A 90-second m4a of two friends bantering about LLMs, sycophancy, and AI code review lives at [`examples/demo.m4a`](examples/demo.m4a). The generated transcript + review sidecar ship with the repo:
+Each chunk (roughly a sentence) is labeled by two independent signals: an **audio diarizer** that tells voices apart (pyannote, or AssemblyAI's speaker tags) and a **text diarizer**, an LLM that reads the conversation for cues like who asks and who answers. Where they agree, you can trust the label. Where they don't, that's exactly where a human should look.
 
-- [`examples/demo.local.transcript.md`](examples/demo.local.transcript.md) — speaker-attributed markdown with `⚠️` markers on low-confidence turns
-- [`examples/demo.local.transcript.polyphony.json`](examples/demo.local.transcript.polyphony.json) — the review sidecar that feeds the React review UI
+| Confidence | Meaning |
+| --- | --- |
+| **100** | Both signals agreed. |
+| **≤ 70** | Only one signal had a view. With pyannote, this drops further when a chunk straddles a speaker change (e.g. 42 when 60% of the chunk's speech is the labeled speaker). |
+| **0–99, rated** | The signals disagreed, and an LLM tie-breaker picked a speaker, rated its own certainty, and gave a short reason. |
+| **25** | Nothing usable; fell back to a default. |
 
-Regenerate either yourself:
+Turns with any chunk below `--review-threshold` (default 70) are marked `⚠️` in the transcript, preceded by an HTML comment giving the lowest score and the reasons:
 
-```bash
-polyphony transcribe examples/demo.m4a --names "Sam,Daniel" --backend local
+```markdown
+<!-- review needed (min confidence 45): chunk 12: reads as a reply to the question -->
+
+⚠️ Daniel: We shipped it. Really? Yes.
 ```
 
-Then open the interactive review UI (React + Vite, served over HTTP so the `<audio>` element can seek the source file):
+A separate LLM pass flags likely ASR mis-hears ("B2B sauce" → "B2B SaaS") with a suggested fix, alternatives, and its own confidence. Nothing is changed until you accept it.
+
+## The review UI
 
 ```bash
-polyphony serve examples/demo.m4a   # opens localhost:8787 in your browser
+polyphony serve interview.m4a
 ```
 
-Drag the confidence slider; click a speaker name to override; select text in any chunk to propose a word correction; hit **Apply** to write `<stem>.transcript.reviewed.md` next to the raw transcript (the raw file is never modified, and your decisions are saved in the sidecar so a reload resumes them). **Speakers & context** lets you name speakers (typed names apply instantly) or list names in any order for the LLM to match, and set a context hint; **Re-analyze with LLM** reruns the text-side passes with them (~1–2 min) while keeping your overrides and corrections. With `--vault PATH` (or `$POLYPHONY_VAULT`), **Apply** also files the recording: the LLM suggests where it belongs in your notes vault (it browses folder/file names, not contents, and names the recording from the conversation), you confirm or edit the folder and name, and **Apply & move** writes the reviewed transcript and moves the audio + all transcripts + sidecar into their own folder, `<folder>/YYYY-MM-DD Short Title/`. Once the recording is in the vault, Apply writes in place. **Copy apply prompt** remains for handing edits to an AI agent instead. Keyboard nav: `j`/`k`, `1`-`9`, `/`, `Tab`, `space`, `p`.
+Opens a local web app (default `http://localhost:8787`) with the transcript and seekable audio.
+
+- **Speakers view.** Drag the confidence slider to show only turns at or below a score, play any turn or chunk from its ▶ button, and click a speaker name to reassign it. Select text to propose your own correction.
+- **Words view.** Step through suggested ASR fixes with `j`/`k`; `1` takes the suggestion, `2`–`9` an alternative, `0` keeps the original, `/` types your own.
+- **Speakers & context.** Name speakers, or list names in any order and let the LLM match them. Add a context hint ("city council meeting on zoning") and **Re-analyze** to rerun the text passes; your overrides and corrections carry over.
+- **Apply** writes `<name>.transcript.reviewed.md` next to the raw transcript. The raw transcript is never modified, and every decision is saved in the `.polyphony.json` sidecar, so a reload picks up where you left off.
+- **Summary** adds a summary, decisions, and action items to the top of the reviewed note.
+
+## Export the corrected data
+
+```bash
+polyphony export interview.m4a --format csv     # → interview.local.transcript.reviewed.csv
+polyphony export interview.m4a --format srt -o captions.srt
+polyphony export interview.m4a --format json -o - | jq '.chunks[] | select(.speaker_overridden)'
+```
+
+| Format | Contents |
+| --- | --- |
+| `json`, `csv` | One row per chunk: start/end, speaker, corrected text, **original ASR text**, confidence, both diarizers' labels, the rationale, and whether a reviewer changed the speaker or the words. The audit trail travels with the data. |
+| `srt`, `vtt` | Speaker-labeled captions. WebVTT uses `<v Speaker>` voice tags, which players and caption editors understand. |
+| `md` | The reviewed transcript, same as **Apply**. |
+
+Exports reflect the review: speaker overrides, accepted corrections, and speaker names are applied.
 
 ---
 
 ## Install
 
-```bash
-git clone https://github.com/joshm1/polyphony
-cd polyphony
-uv sync
-```
-
-System dependencies:
-
-- **`ffmpeg`** — for audio normalization (`brew install ffmpeg`)
-- **LLM for the text-side passes** (local backend diarization + reconciler, and ASR correction on every backend) — runs through [pydantic-ai](https://ai.pydantic.dev). The default `openai-codex:gpt-6-sol` bills your ChatGPT/Codex subscription: install the [Codex CLI](https://github.com/openai/codex) and run `codex login` once. Any other pydantic-ai model string works via `--llm-model` / `$POLYPHONY_LLM_MODEL` (install the matching `pydantic-ai-slim` extra).
-- **Hugging Face token** — for pyannote. Create at <https://huggingface.co/settings/tokens> and accept BOTH:
-  - <https://huggingface.co/pyannote/speaker-diarization-3.1>
-  - <https://huggingface.co/pyannote/segmentation-3.0>
-- **Google Cloud ADC** — for the Gemini backend (`gcloud auth application-default login`)
-
-Set up your shell env (one option):
+polyphony is a command-line tool. Install it from GitHub with [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/):
 
 ```bash
-cp mise.toml.example mise.toml
-# edit mise.toml, fill in your HF_TOKEN source
-mise trust
+uv tool install git+https://github.com/joshm1/polyphony
+# or
+pipx install git+https://github.com/joshm1/polyphony
+# or run once without installing
+uvx --from git+https://github.com/joshm1/polyphony polyphony --help
 ```
 
-Or just `export HF_TOKEN=hf_…` however you like.
+To run everything on your own machine with Whisper + pyannote, add the `local` extra. It pulls in PyTorch and model runtimes, several GB in total:
+
+```bash
+uv tool install "polyphony[local] @ git+https://github.com/joshm1/polyphony"
+```
+
+You also need [`ffmpeg`](https://ffmpeg.org/) on your `PATH` (`brew install ffmpeg`, `apt install ffmpeg`).
+
+## Quick start
+
+```bash
+export ASSEMBLYAI_API_KEY=...   # speech-to-text + voice diarization
+export OPENAI_API_KEY=...       # or ANTHROPIC_API_KEY / GOOGLE_API_KEY, for the text-side checks
+
+polyphony transcribe interview.m4a --names "Host,Guest" --context-hint "local news interview about the transit levy"
+polyphony serve interview.m4a
+polyphony export interview.m4a --format csv
+```
+
+`transcribe` writes `<name>.<backend>.transcript.md` and the `<name>.<backend>.transcript.polyphony.json` sidecar next to the audio. Names are listed in order of first appearance.
 
 ---
 
-## Usage
+## Backends
 
-```bash
-# Auto-pick the backend (AssemblyAI if $ASSEMBLYAI_API_KEY is set, else Gemini)
-polyphony transcribe recording.m4a --names "Host,Guest"
+| Backend | Speech-to-text and voice diarization | Audio leaves your machine? | Needs |
+| --- | --- | --- | --- |
+| `assemblyai` | AssemblyAI, cross-checked by the text diarizer | Yes, to AssemblyAI | `$ASSEMBLYAI_API_KEY` |
+| `local` | Whisper large-v3-turbo + pyannote 3.1, cross-checked by the text diarizer | **No** | the `local` extra, a Hugging Face token |
+| `gemini` | One Gemini call does both | Yes, to Google | `$GEMINI_API_KEY`, or Vertex AI credentials |
 
-# Force AssemblyAI (hosted ASR + voice diarization, cross-checked by the LLM)
-polyphony transcribe recording.m4a --backend assemblyai --names "Host,Guest"
+`--backend auto` (the default) uses AssemblyAI when `$ASSEMBLYAI_API_KEY` is set, otherwise Gemini. The Gemini backend rates its own confidence per turn but has no second signal to cross-check, so `assemblyai` and `local` give the more meaningful scores.
 
-# Force the local ensemble backend
-polyphony transcribe recording.m4a --backend local --names "Host,Guest"
+The `local` backend needs a [Hugging Face token](https://huggingface.co/settings/tokens) in `$HF_TOKEN` with both pyannote licenses accepted: [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0). Expect roughly 10 minutes of Whisper per hour of audio on Apple Silicon and longer for pyannote on CPU; both results are cached.
 
-# Force Gemini
-polyphony transcribe recording.m4a --backend gemini --project my-gcp-project
+## Choosing the LLM
 
-# Domain hint helps the LLM passes with domain-specific terms
-polyphony transcribe talk.m4a --context-hint "cooking podcast about regional barbecue styles"
+The text-side passes (text diarization, tie-breaking, paragraphing, ASR-error flags, summaries) run through [pydantic-ai](https://ai.pydantic.dev), so any provider it supports works. Set `--llm-model` or `$POLYPHONY_LLM_MODEL`:
 
-# Tighter review threshold (default 70 — turns below this get ⚠️ flagged)
-polyphony transcribe talk.m4a --review-threshold 85
-
-# Open an existing transcript + audio in the browser with seekable playback
-polyphony serve recording.m4a
-```
-
-All flags: `polyphony --help` and `polyphony transcribe --help`.
-
-Outputs land next to the audio: `<stem>.<backend>.transcript.md` and `<stem>.<backend>.transcript.polyphony.json` (the sidecar `polyphony serve` reads).
-
----
-
-## Architecture
-
-```
-                    ┌──────────────┐
-        audio ──────▶  ffmpeg 16k  ──────┐
-                    └──────────────┘     │
-                                         ▼
-                              ┌────────────────────┐
-                              │  Whisper-large-v3  │
-                              │  (chunk-level ts)  │
-                              └─────────┬──────────┘
-                                        │
-                                        ▼  per-chunk text + timing
-        ┌───────────────────────────────┴───────────────────────────────┐
-        │                                                                │
-        ▼                                                                ▼
-┌────────────────┐                                            ┌────────────────────┐
-│   pyannote     │  speaker by voice fingerprint              │  LLM (pydantic-ai) │
-│   3.1 audio    │                                            │  text-side reasoning│
-└───────┬────────┘                                            └─────────┬──────────┘
-        │ chunk → speaker (or None)                                     │ chunk → speaker
-        │                                                                │
-        └───────────────────────┐               ┌────────────────────────┘
-                                ▼               ▼
-                           ┌─────────────────────────┐
-                           │   reconciler (LLM)       │
-                           │  picks final + 0-100     │
-                           │     confidence           │
-                           └────────────┬─────────────┘
-                                        │
-                                        ▼
-                           ┌─────────────────────────┐
-                           │  asr_correction (LLM)    │
-                           │   flag wrong-word ASR    │
-                           │   errors with reasons    │
-                           └────────────┬─────────────┘
-                                        │
-                ┌───────────────────────┴───────────────────────┐
-                ▼                                               ▼
-        ┌───────────────┐                              ┌──────────────────┐
-        │ transcript.md │                              │ polyphony.json   │
-        │  ⚠️ on low-   │                              │  (sidecar)        │
-        │  confidence    │                              └────────┬─────────┘
-        └───────────────┘                                       │
-                                                                 ▼
-                                                      ┌──────────────────┐
-                                                      │ polyphony serve  │
-                                                      │ React + Vite UI  │
-                                                      │ accept / reject  │
-                                                      │ Apply → reviewed │
-                                                      └──────────────────┘
-```
-
-The Gemini backend collapses the entire upper half into one multimodal API call; the markdown + sidecar + UI stages are backend-agnostic.
-
----
-
-## Module map
-
-| File | Purpose |
+| Value | Uses |
 | --- | --- |
-| [`cli.py`](src/polyphony/cli.py) | Click CLI; picks a backend, runs it, writes the transcript + sidecar + `polyphony serve` entrypoint |
-| [`backends/base.py`](src/polyphony/backends/base.py) | `Backend` ABC and `BackendConfig`; what new backends implement |
-| [`backends/local.py`](src/polyphony/backends/local.py) | Whisper + pyannote + LLM diarize + reconciler |
-| [`backends/assemblyai.py`](src/polyphony/backends/assemblyai.py) | AssemblyAI ASR + speaker tags → sentence-sized chunks, then LLM diarize + reconciler |
-| [`backends/gemini.py`](src/polyphony/backends/gemini.py) | Single Gemini 2.5 multimodal call on Vertex AI; auto-compresses with Opus when over the inline limit |
-| [`whisper.py`](src/polyphony/whisper.py) | HF transformers Whisper-large-v3-turbo with chunk-level timestamps |
-| [`diarize.py`](src/polyphony/diarize.py) | pyannote pipeline + LLM text diarization; per-chunk speaker labels |
-| [`llm.py`](src/polyphony/llm.py) | pydantic-ai wrapper for the text-side LLM passes (structured output, model selection) |
-| [`reconcile.py`](src/polyphony/reconcile.py) | Merges two diarizations into one with confidence scores |
-| [`asr_correction.py`](src/polyphony/asr_correction.py) | Optional pass that flags likely Whisper errors (e.g. "SaaS" → "sauce") |
-| [`transcript.py`](src/polyphony/transcript.py) | Folds labeled chunks into speaker turns; renders markdown |
-| [`playground.py`](src/polyphony/playground.py) | Shapes the JSON payload the React review UI consumes (single source of truth for the wire contract) |
-| [`serve.py`](src/polyphony/serve.py) | FastAPI server: serves the React bundle under [`static/`](src/polyphony/static) + the audio with HTTP range support |
-| [`static/`](src/polyphony/static) | Built React bundle (committed; rebuilt from [`frontend/`](frontend) by the pre-commit hook) |
-| [`cache.py`](src/polyphony/cache.py) | On-disk cache for the slow stages — Whisper + pyannote can take 40 min on a CPU |
-| [`audio.py`](src/polyphony/audio.py) | `ffmpeg` wrapper to normalize anything to 16 kHz mono 16-bit PCM |
+| `auto` (default) | The first of `$OPENAI_API_KEY`, `$ANTHROPIC_API_KEY`, `$GOOGLE_API_KEY` that is set |
+| `openai`, `anthropic`, `google` | That provider's default model |
+| `openai-codex` | A ChatGPT subscription, via the credentials `codex login` stores |
+| `provider:model` | Any pydantic-ai model string, e.g. `anthropic:claude-opus-5` or `ollama:qwen3` (set `$OLLAMA_BASE_URL`) for a model on your own hardware |
+| `none` | No LLM at all |
 
-The review UI itself is a small React/Vite app under [`frontend/`](frontend). Python-only contributors never need to touch it — the built bundle is committed under `src/polyphony/static/` and pre-commit rebuilds it whenever frontend sources change.
+**Without an LLM**, polyphony still works: speakers come from the audio diarizer alone and every chunk is capped at 70, lower where pyannote saw a speaker change inside the chunk. Paragraphing and ASR-error flags are skipped, and the UI disables re-analysis and summaries. Raise `--review-threshold` (e.g. 75) to send every turn through review. Combined with `--backend local`, nothing leaves your machine.
 
----
-
-## When to use which backend
-
-| Situation | Backend |
-| --- | --- |
-| Audio must stay on your machine | `local` |
-| Fast, with the audio + text ensemble and per-chunk confidence | `assemblyai` |
-| Hour-long audio, want results in <60s, willing to call out | `gemini` |
-| Quality matters more than speed | `local` (the ensemble catches more errors) |
-| Just trying it out | `assemblyai` (one API key + `codex login`) |
-
-Cost: a 1-hour audio call on Gemini 2.5 Flash via Vertex is currently a few cents; AssemblyAI bills per audio hour. The LLM passes run on your ChatGPT subscription by default. The local backend is free if you ignore your laptop fan.
+Only transcript text is sent to the LLM, never audio.
 
 ---
 
 ## Configuration
 
-Environment variables:
-
-| Var | Purpose |
+| Variable | Purpose |
 | --- | --- |
-| `ASSEMBLYAI_API_KEY` | AssemblyAI API key (assemblyai backend) |
-| `HF_TOKEN` | Hugging Face token with pyannote license accepted (local backend) |
-| `GOOGLE_CLOUD_PROJECT` | GCP project for Vertex AI (Gemini backend) |
-| `GOOGLE_CLOUD_LOCATION` | Defaults to `us-east1` |
-| `POLYPHONY_GCS_BUCKET` | Bucket for audio >15MB on the Gemini backend (only needed for very long audio) |
-| `POLYPHONY_LLM_MODEL` | pydantic-ai model for the text-side LLM passes (default `openai-codex:gpt-6-sol`) |
-| `CODEX_HOME` | Where `codex login` stored `auth.json` (default `~/.codex`) |
-| `POLYPHONY_VAULT` | Notes vault (e.g. Obsidian) that `polyphony serve` can file recordings into |
-| `POLYPHONY_CACHE_DIR` | Override the cache location (default `~/.cache/polyphony`) |
+| `POLYPHONY_LLM_MODEL` | Default for `--llm-model` |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | LLM provider keys picked up by `auto` |
+| `ASSEMBLYAI_API_KEY` | AssemblyAI backend |
+| `HF_TOKEN` | Hugging Face token for pyannote (`local` backend) |
+| `GEMINI_API_KEY` | Gemini backend via the Gemini API; without it, Vertex AI via ADC |
+| `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` | Gemini backend on Vertex AI (location defaults to `us-east1`) |
+| `POLYPHONY_GCS_BUCKET` | Bucket for audio too large to send inline to Gemini on Vertex AI |
+| `POLYPHONY_VAULT` | Notes vault (e.g. Obsidian) that `polyphony serve` can file reviewed recordings into |
+| `POLYPHONY_CACHE_DIR` | Cache location (default `~/.cache/polyphony`) |
+
+Slow stages (Whisper, pyannote, AssemblyAI, and each LLM pass) are cached per audio file, keyed on its path, size, and modification time. Re-running with different names or a different threshold is fast.
+
+All options: `polyphony transcribe --help`, `polyphony serve --help`, `polyphony export --help`.
 
 ---
 
-## Caching
+## Example
 
-The slow stages (Whisper transcription, pyannote diarization, ASR-correction LLM pass) get cached at `~/.cache/polyphony/<sha>/` keyed on the audio path + file mtime + size. Iterating on prompts or rendering is fast after the first pass; touching the audio file invalidates everything.
-
----
-
-## Tests
+[`examples/demo.m4a`](examples/demo.m4a) is a 90-second synthetic two-person conversation (regenerate it with [`examples/generate_demo.sh`](examples/generate_demo.sh) on macOS). Try the full loop on it:
 
 ```bash
-uv run pytest
+polyphony transcribe examples/demo.m4a --names "Sam,Daniel"
+polyphony serve examples/demo.m4a
 ```
 
-Coverage is intentionally narrow — pure-logic bits (`reconcile`, label parsing, `pyannote_per_chunk_labels`). Anything that hits Whisper, pyannote, the LLM, or Vertex is integration-tested by running on real audio.
+## Development
 
----
+```bash
+uv sync --all-extras
+uv run pytest
+uv run pyright
+uv run ruff check src tests && uv run ruff format --check src tests
+```
+
+The review UI is a React app in [`frontend/`](frontend); its built bundle is committed under `src/polyphony/static/` so installs don't need Node. See [AGENTS.md](AGENTS.md) for the architecture.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
