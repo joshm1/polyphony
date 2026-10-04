@@ -70,9 +70,12 @@ def reanalyze(
     names: list[str],
     candidate_names: list[str],
     context_hint: str | None,
+    model: str,
 ) -> dict[str, Any]:
-    """Return an updated sidecar payload. `data` must already carry the reviewer's current state."""
-    model: str = data["llm_model"]
+    """Return an updated sidecar payload, re-analyzed with `model`.
+
+    `data` must already carry the reviewer's current state.
+    """
     overrides = overrides_of(data)
     base = labels_from_payload(data)
     reviewed = [replace(lbl, override=overrides.get(lbl.chunk.idx)) for lbl in base]
@@ -88,7 +91,9 @@ def reanalyze(
         audio = [lbl.audio for lbl in base]
         n_speakers = len({a for a in audio if a is not None})
         llm = diarize_llm(chunks, name_list, model, expected_speakers=max(2, n_speakers, len(resolved)))
-        base = reconcile(chunks, audio, llm, name_list, model=model)
+        purity = [lbl.audio_purity for lbl in base]
+        has_purity = any(p is not None for p in purity)
+        base = reconcile(chunks, audio, llm, name_list, model=model, audio_purity=purity if has_purity else None)
     else:
         logger.info("No audio-diarizer labels in sidecar; keeping speaker labels, redoing text passes only.")
 
@@ -101,6 +106,7 @@ def reanalyze(
     )
 
     updated = dict(data)
+    updated["llm_model"] = model
     updated["names"] = resolved
     updated["context_hint"] = context_hint
     updated["paragraph_breaks"] = breaks if breaks is not None else data.get("paragraph_breaks")

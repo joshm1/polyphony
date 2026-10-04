@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from .asr_correction import WordFlag
 from .filing import is_filed, move_recording, obsidian_url, planned_moves, propose_location
-from .llm import resolve_llm_model
+from .llm import LLMUnavailable, check_llm, resolve_llm_model
 from .playground import playground_payload
 from .reanalyze import reanalyze
 from .review import apply_review, render_reviewed_transcript, reviewed_path
@@ -117,9 +117,9 @@ def serve_review(
     port: int = 8787,
     open_browser: bool = True,
     vault: Path | None = None,
-    llm_model: str | None = None,
+    llm_choice: str | None = None,
 ) -> None:
-    """Serve the review UI. `llm_model` overrides the model recorded in the sidecar."""
+    """Serve the review UI. `llm_choice` is a `--llm-model` value; see `serve_llm_model`."""
     import uvicorn
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -138,8 +138,10 @@ def serve_review(
     # the client needs to point its <audio> element at.
     data = json.loads(labels_path.read_text())
     data["audio_url"] = "/api/audio"
-    # A sidecar transcribed without an LLM can still use one configured now.
-    data["llm_model"] = llm_model or data.get("llm_model") or resolve_llm_model()
+    try:
+        llm_model = serve_llm_model(llm_choice, data.get("llm_model"))
+    except LLMUnavailable as e:
+        raise click.ClickException(str(e)) from e
     # Sidecars written before these fields existed.
     data.setdefault("context_hint", None)
     data.setdefault("review", {"overrides": {}, "word_decisions": {}})
@@ -157,19 +159,20 @@ def serve_review(
         """The sidecar plus server-side facts the UI needs; these never get written back."""
         return {
             **data,
+            # The model this server runs LLM actions with; the sidecar keeps the one the transcript was made with.
+            "llm_model": llm_model,
             "vault": str(vault) if vault else None,
             "filed": vault is not None and is_filed(vault, audio_path),
             "summary_stale": summary_stale(),
         }
 
     def require_llm() -> str:
-        model = data["llm_model"]
-        if model is None:
+        if llm_model is None:
             raise HTTPException(
                 status_code=400,
                 detail="No LLM configured: set an API key (e.g. $OPENAI_API_KEY) or pass --llm-model, then restart.",
             )
-        return model
+        return llm_model
 
     def summary_stale() -> bool:
         summary = data.get("summary")
@@ -251,9 +254,9 @@ def serve_review(
     # minute-long LLM calls don't block audio streaming.
     @app.post("/api/reanalyze")
     def api_reanalyze(req: ReanalyzeRequest) -> JSONResponse:
-        require_llm()
+        model = require_llm()
         take_review_state(req, req.names)
-        data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
+        data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint, model))
         out, skipped = write_outputs()
         return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": client_payload()})
 
@@ -337,6 +340,27 @@ def serve_review(
         webbrowser.open(f"http://localhost:{port}/")
 
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+
+
+def serve_llm_model(choice: str | None, recorded: str | None) -> str | None:
+    """The model for the server's LLM actions (re-analysis, summary, vault filing).
+
+    An explicit `--llm-model` wins, and `none` turns them off; it raises
+    LLMUnavailable if it can't be built. Otherwise the sidecar's recorded model,
+    then `$POLYPHONY_LLM_MODEL` / auto. Those defaults only disable the LLM
+    actions when unusable, since reviewing and exporting don't need them.
+    """
+    if choice:
+        model = resolve_llm_model(choice)
+        check_llm(model)
+        return model
+    model = recorded or resolve_llm_model()
+    try:
+        check_llm(model)
+    except LLMUnavailable as e:
+        logger.warning(f"{e}. LLM actions are disabled; pass --llm-model to pick another.")
+        return None
+    return model
 
 
 def _file_iter(path: Path, start: int, end: int, chunk_size: int = 1024 * 256):

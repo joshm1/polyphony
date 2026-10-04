@@ -54,3 +54,22 @@ def test_check_llm_accepts_no_llm_and_rejects_unknown_providers() -> None:
     check_llm(None)
     with pytest.raises(LLMUnavailable):
         check_llm("no-such-provider:model")
+
+
+def test_serve_uses_flag_then_recorded_model_then_auto(monkeypatch: pytest.MonkeyPatch) -> None:
+    from polyphony.serve import serve_llm_model
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    assert serve_llm_model("none", "openai:gpt-6-sol") is None
+    assert serve_llm_model("anthropic", None) == PROVIDER_DEFAULT_MODELS["anthropic"]
+    assert serve_llm_model(None, "anthropic:claude-opus-5") == "anthropic:claude-opus-5"
+    assert serve_llm_model(None, None) == PROVIDER_DEFAULT_MODELS["openai"]
+
+
+def test_serve_disables_an_unusable_default_but_rejects_an_unusable_flag() -> None:
+    from polyphony.serve import serve_llm_model
+
+    assert serve_llm_model(None, "no-such-provider:model") is None
+    with pytest.raises(LLMUnavailable):
+        serve_llm_model("no-such-provider:model", None)

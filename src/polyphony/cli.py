@@ -19,10 +19,10 @@ import click
 from loguru import logger
 
 from .asr_correction import flag_asr_errors
-from .backends import BACKENDS, BackendUnavailable, resolve_backend
+from .backends import BackendUnavailable, resolve_backend
 from .backends.base import BackendConfig
 from .export import EXPORT_FORMATS, ExportFormat, export_reviewed
-from .llm import LLMUnavailable, check_llm, resolve_llm_model
+from .llm import resolve_llm_model
 from .paragraphize import paragraphize, paragraphs_for
 from .serve import dump_labels_sidecar, serve_review
 from .transcript import build_transcript
@@ -105,8 +105,8 @@ def main(ctx: click.Context) -> None:
     show_default="auto",
     help="LLM for the text-side passes (speaker cross-check, tie-breaking, paragraphs, ASR correction): "
     "a pydantic-ai `provider:model` string, a bare provider (openai, anthropic, google, openai-codex) for its "
-    "default model, 'auto' (first of $OPENAI_API_KEY / $ANTHROPIC_API_KEY / $GOOGLE_API_KEY that is set), or "
-    "'none' to skip every LLM pass. Defaults to $POLYPHONY_LLM_MODEL, else auto.",
+    "default model, 'auto' (first of $OPENAI_API_KEY / $ANTHROPIC_API_KEY / $GOOGLE_API_KEY or $GEMINI_API_KEY "
+    "that is set), or 'none' to skip every LLM pass. Defaults to $POLYPHONY_LLM_MODEL, else auto.",
 )
 @click.option(
     "--project",
@@ -268,12 +268,7 @@ def serve_cmd(
     if sidecar is None:
         sidecar = find_sidecar(audio_path)
 
-    model = resolve_llm_model(llm_model) if llm_model else None
-    try:
-        check_llm(model)
-    except LLMUnavailable as e:
-        raise click.ClickException(str(e)) from e
-    serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault, llm_model=model)
+    serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault, llm_choice=llm_model)
 
 
 @main.command(name="export")
@@ -315,7 +310,7 @@ def export_cmd(source: Path, fmt: ExportFormat, output: Path | None) -> None:
 def find_sidecar(audio_path: Path) -> Path:
     """The `<audio-stem>.<backend>.transcript.polyphony.json` that `transcribe` wrote next to the audio."""
     base = audio_path.with_suffix("")
-    for backend in BACKENDS:
+    for backend in ("gemini", "assemblyai", "local"):
         candidate = base.with_name(f"{base.name}.{backend}.transcript.polyphony.json")
         if candidate.exists():
             return candidate
