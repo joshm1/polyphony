@@ -15,10 +15,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
 from .types import Chunk, PyannoteSegment
+
+if TYPE_CHECKING:
+    from .asr_correction import WordFlag
+    from .backends.assemblyai import Word
 
 CACHE_ROOT = Path(os.environ.get("POLYPHONY_CACHE_DIR") or Path.home() / ".cache" / "polyphony")
 
@@ -91,7 +96,7 @@ def _assemblyai_stage(speech_model: str) -> str:
     return f"assemblyai-words-v1|{speech_model}"
 
 
-def load_assemblyai_words(audio_path: Path, speech_model: str):
+def load_assemblyai_words(audio_path: Path, speech_model: str) -> list[Word] | None:
     # Defer import to avoid a circular import at module load.
     from .backends.assemblyai import Word
 
@@ -108,7 +113,7 @@ def load_assemblyai_words(audio_path: Path, speech_model: str):
     return words
 
 
-def save_assemblyai_words(audio_path: Path, speech_model: str, words) -> None:
+def save_assemblyai_words(audio_path: Path, speech_model: str, words: list[Word]) -> None:
     path = _dir_for(audio_path, _assemblyai_stage(speech_model)) / "words.json"
     payload = [{"text": w.text, "start": w.start, "end": w.end, "speaker": w.speaker} for w in words]
     path.write_text(json.dumps(payload))
@@ -124,7 +129,7 @@ def _asr_flags_stage(model: str, prompt_digest: str) -> str:
     return f"asr-correction-v2|{model}|{prompt_digest}"
 
 
-def load_asr_flags(audio_path: Path, model: str, prompt_digest: str):
+def load_asr_flags(audio_path: Path, model: str, prompt_digest: str) -> list[WordFlag] | None:
     # Defer import to avoid a circular import at module load.
     from .asr_correction import WordFlag
 
@@ -151,7 +156,7 @@ def load_asr_flags(audio_path: Path, model: str, prompt_digest: str):
     return flags
 
 
-def save_asr_flags(audio_path: Path, model: str, prompt_digest: str, flags) -> None:
+def save_asr_flags(audio_path: Path, model: str, prompt_digest: str, flags: list[WordFlag]) -> None:
     path = _dir_for(audio_path, _asr_flags_stage(model, prompt_digest)) / "flags.json"
     payload = [f.as_dict() for f in flags]
     path.write_text(json.dumps(payload))
@@ -175,9 +180,10 @@ def load_paragraph_breaks(audio_path: Path, model: str, prompt_digest: str) -> l
     except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Paragraph cache read failed ({e}); will recompute.")
         return None
-    if not isinstance(data, list) or not all(isinstance(i, int) for i in data):
+    if not isinstance(data, list) or not all(isinstance(i, int) for i in cast(list[object], data)):
         logger.warning("Paragraph cache malformed; will recompute.")
         return None
+    data = cast(list[int], data)
     logger.info(f"Loaded {len(data)} paragraph break(s) from cache: {path}")
     return data
 

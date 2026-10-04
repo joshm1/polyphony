@@ -44,7 +44,7 @@ def _sidecar() -> dict[str, Any]:
     }
 
 
-def test_json_keeps_corrected_and_original_text_with_audit_fields():
+def test_json_keeps_corrected_and_original_text_with_audit_fields() -> None:
     out = json.loads(export_reviewed(_sidecar(), "json"))
     first, second = out["chunks"]
     assert (first["text"], first["original_text"], first["text_corrected"]) == ("We sell SaaS.", "We sell sauce.", True)
@@ -54,20 +54,20 @@ def test_json_keeps_corrected_and_original_text_with_audit_fields():
     assert out["speakers"] == [{"id": 1, "name": "Ana"}, {"id": 2, "name": "Speaker 2"}]
 
 
-def test_csv_has_one_row_per_chunk():
+def test_csv_has_one_row_per_chunk() -> None:
     rows = list(csv.DictReader(io.StringIO(export_reviewed(_sidecar(), "csv"))))
     assert [r["speaker"] for r in rows] == ["Ana", "Speaker 2"]
     assert rows[0]["text"] == "We sell SaaS."
 
 
-def test_srt_numbers_cues_and_uses_comma_milliseconds():
+def test_srt_numbers_cues_and_uses_comma_milliseconds() -> None:
     assert export_reviewed(_sidecar(), "srt") == (
         "1\n00:00:00,000 --> 00:00:02,500\nAna: We sell SaaS.\n\n"
         "2\n00:00:02,500 --> 01:01:01,250\nSpeaker 2: Since <when> & why?\n"
     )
 
 
-def test_vtt_uses_voice_spans_and_escapes_markup():
+def test_vtt_uses_voice_spans_and_escapes_markup() -> None:
     assert export_reviewed(_sidecar(), "vtt") == (
         "WEBVTT\n\n"
         "00:00:00.000 --> 00:00:02.500\n<v Ana>We sell SaaS.\n\n"
@@ -75,7 +75,7 @@ def test_vtt_uses_voice_spans_and_escapes_markup():
     )
 
 
-def test_markdown_matches_the_reviewed_note():
+def test_markdown_matches_the_reviewed_note() -> None:
     assert export_reviewed(_sidecar(), "md") == "Ana: We sell SaaS.\n\nSpeaker 2: Since <when> & why?\n"
 
 

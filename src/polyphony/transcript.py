@@ -25,7 +25,7 @@ def display_name(speaker_id: int, names: list[str] | None) -> str:
 
 
 @dataclass
-class _Turn:
+class Turn:
     speaker: int
     chunks: list[Chunk]
     min_conf: int
@@ -33,13 +33,13 @@ class _Turn:
     notes: list[str]
 
 
-def _group_into_turns(labels: list[ChunkLabel], review_threshold: int) -> list[_Turn]:
-    turns: list[_Turn] = []
-    cur: _Turn | None = None
+def group_into_turns(labels: list[ChunkLabel], review_threshold: int) -> list[Turn]:
+    turns: list[Turn] = []
+    cur: Turn | None = None
     for lbl in labels:
         spk = lbl.effective_speaker
         if cur is None or cur.speaker != spk:
-            cur = _Turn(speaker=spk, chunks=[], min_conf=100, flagged=False, notes=[])
+            cur = Turn(speaker=spk, chunks=[], min_conf=100, flagged=False, notes=[])
             turns.append(cur)
         cur.chunks.append(lbl.chunk)
         cur.min_conf = min(cur.min_conf, lbl.confidence)
@@ -69,7 +69,7 @@ def build_transcript(
     `paragraphize.paragraphize_via_gemini` from the pipeline first for
     the good shape.
     """
-    turns = _group_into_turns(labels, review_threshold=review_threshold)
+    turns = group_into_turns(labels, review_threshold=review_threshold)
 
     if per_turn_paragraphs is not None and len(per_turn_paragraphs) != len(turns):
         logger.warning(

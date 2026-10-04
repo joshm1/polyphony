@@ -13,6 +13,7 @@ granularity as Whisper chunks, instead of AssemblyAI's multi-minute utterances.
 
 from __future__ import annotations
 
+import importlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,7 +44,7 @@ class AssemblyAIBackend(Backend):
 
     def preflight(self, cfg: BackendConfig) -> None:
         try:
-            import assemblyai  # noqa: F401
+            importlib.import_module("assemblyai")
         except ImportError as e:
             raise BackendUnavailable(f"assemblyai SDK not installed: {e}") from e
         if not os.environ.get(API_KEY_ENV):

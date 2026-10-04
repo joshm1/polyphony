@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from polyphony.review import apply_corrections, apply_review, resolve_corrections, reviewed_path
 
 
-def _chunk(idx: int, text: str, final: int, confidence: int = 100) -> dict:
+def _chunk(idx: int, text: str, final: int, confidence: int = 100) -> dict[str, Any]:
     return {
         "idx": idx,
         "start": float(idx),
@@ -21,28 +24,28 @@ def _chunk(idx: int, text: str, final: int, confidence: int = 100) -> dict:
     }
 
 
-def _flag(chunk_idx: int, original: str, suggested: str) -> dict:
+def _flag(chunk_idx: int, original: str, suggested: str) -> dict[str, Any]:
     return {"chunk_idx": chunk_idx, "original": original, "suggested": suggested, "confidence": 90}
 
 
-def test_reviewed_path_sits_next_to_raw_transcript():
+def test_reviewed_path_sits_next_to_raw_transcript() -> None:
     sidecar = Path("/x/a b.assemblyai.transcript.polyphony.json")
     assert reviewed_path(sidecar) == Path("/x/a b.assemblyai.transcript.reviewed.md")
 
 
-def test_undecided_flag_takes_suggestion_and_original_is_skipped():
+def test_undecided_flag_takes_suggestion_and_original_is_skipped() -> None:
     flags = [_flag(0, "sauce", "SaaS"), _flag(0, "B2B", "b2b"), _flag(1, "x", "y")]
     decisions = {"1": {"kind": "original", "value": "B2B"}, "2": {"kind": "custom", "value": "z"}}
     assert resolve_corrections(flags, decisions) == {0: [("sauce", "SaaS")], 1: [("x", "z")]}
 
 
-def test_apply_corrections_never_rematches_replaced_text():
+def test_apply_corrections_never_rematches_replaced_text() -> None:
     text, missed = apply_corrections("a cat sat", [("cat", "cat cat"), ("sat", "stood"), ("dog", "wolf")])
     assert text == "a cat cat stood"
     assert missed == ["dog"]
 
 
-def test_apply_review_overrides_speaker_and_clears_flag():
+def test_apply_review_overrides_speaker_and_clears_flag() -> None:
     data = {
         "names": ["Sam", "Dan"],
         "review_threshold": 70,
@@ -56,7 +59,7 @@ def test_apply_review_overrides_speaker_and_clears_flag():
     assert skipped == []
 
 
-def test_apply_review_keeps_flag_on_unreviewed_low_confidence_turn():
+def test_apply_review_keeps_flag_on_unreviewed_low_confidence_turn() -> None:
     data = {
         "names": [],
         "chunks": [_chunk(0, "Hi.", 1, confidence=40)],
@@ -69,13 +72,19 @@ def test_apply_review_keeps_flag_on_unreviewed_low_confidence_turn():
 # ---------- reanalyze: name resolution + flag merging ----------
 
 
-def test_resolve_names_keeps_explicit_and_fills_rest_from_llm(monkeypatch):
+def test_resolve_names_keeps_explicit_and_fills_rest_from_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     from polyphony import reanalyze
     from polyphony.types import Chunk, ChunkLabel
 
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def fake_identify(labels, candidates, fixed, model, context_hint):
+    def fake_identify(
+        labels: list[ChunkLabel],
+        candidates: list[str],
+        fixed: dict[int, str],
+        model: str | None,
+        context_hint: str | None,
+    ) -> dict[int, str]:
         seen.update(candidates=candidates, fixed=fixed)
         return {2: "Guest"}
 
@@ -88,7 +97,7 @@ def test_resolve_names_keeps_explicit_and_fills_rest_from_llm(monkeypatch):
     assert seen == {"candidates": ["Guest"], "fixed": {1: "Host"}}
 
 
-def test_merge_flags_carries_explicit_decisions_and_user_flags():
+def test_merge_flags_carries_explicit_decisions_and_user_flags() -> None:
     from polyphony.reanalyze import merge_flags
 
     old = [_flag(1, "sauce", "SaaS"), _flag(2, "x", "y"), {**_flag(3, "a", "b"), "userAdded": True}]
@@ -103,7 +112,7 @@ def test_merge_flags_carries_explicit_decisions_and_user_flags():
 # ---------- summary in the reviewed note ----------
 
 
-def test_reviewed_note_puts_summary_above_transcript():
+def test_reviewed_note_puts_summary_above_transcript() -> None:
     data = {
         "names": ["Host", "Guest"],
         "chunks": [_chunk(0, "Hello.", 1), _chunk(1, "Hi.", 2)],

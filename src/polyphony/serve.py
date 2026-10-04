@@ -26,7 +26,7 @@ import json
 import socket
 from importlib.resources import files
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import click
 from loguru import logger
@@ -61,10 +61,13 @@ class WordDecision(BaseModel):
     value: str
 
 
-class ApplyRequest(BaseModel):
+class ReviewState(BaseModel):
     overrides: dict[int, int]  # chunk idx → speaker id
     asr_flags: list[ReviewFlag]  # includes reviewer-added flags
     word_decisions: dict[int, WordDecision]  # asr_flags index → decision
+
+
+class ApplyRequest(ReviewState):
     names: list[str] | None = None  # indexed by speaker id - 1; "" = unnamed; None = keep current
 
 
@@ -77,7 +80,7 @@ class VaultMoveRequest(ApplyRequest):
     basename: str
 
 
-class ReanalyzeRequest(ApplyRequest):
+class ReanalyzeRequest(ReviewState):
     names: list[str]
     candidate_names: list[str]  # any order; the LLM places them on unnamed speakers
     context_hint: str | None
@@ -150,7 +153,7 @@ def serve_review(
         name="assets",
     )
 
-    def client_payload() -> dict:
+    def client_payload() -> dict[str, Any]:
         """The sidecar plus server-side facts the UI needs; these never get written back."""
         return {
             **data,
@@ -221,16 +224,16 @@ def serve_review(
             headers=headers,
         )
 
-    def take_review_state(req: ApplyRequest) -> None:
-        if req.names is not None:
-            data["names"] = req.names
+    def take_review_state(req: ReviewState, names: list[str] | None) -> None:
+        if names is not None:
+            data["names"] = names
         data["asr_flags"] = [f.model_dump(exclude_none=True) for f in req.asr_flags]
         data["review"] = {
             "overrides": {str(k): v for k, v in req.overrides.items()},
             "word_decisions": {str(k): d.model_dump() for k, d in req.word_decisions.items()},
         }
 
-    def write_outputs() -> tuple[Path, list[dict]]:
+    def write_outputs() -> tuple[Path, list[dict[str, Any]]]:
         markdown, skipped = apply_review(data)
         out = reviewed_path(labels_path)
         out.write_text(markdown)
@@ -240,7 +243,7 @@ def serve_review(
 
     @app.post("/api/apply")
     def api_apply(req: ApplyRequest) -> JSONResponse:
-        take_review_state(req)
+        take_review_state(req, req.names)
         out, skipped = write_outputs()
         return JSONResponse({"reviewed_path": str(out), "skipped": skipped})
 
@@ -249,7 +252,7 @@ def serve_review(
     @app.post("/api/reanalyze")
     def api_reanalyze(req: ReanalyzeRequest) -> JSONResponse:
         require_llm()
-        take_review_state(req)
+        take_review_state(req, req.names)
         data.update(reanalyze(data, audio_path, req.names, req.candidate_names, req.context_hint))
         out, skipped = write_outputs()
         return JSONResponse({"reviewed_path": str(out), "skipped": skipped, "data": client_payload()})
@@ -259,7 +262,7 @@ def serve_review(
     def api_summary(req: SummaryRequest) -> JSONResponse:
         if req.regenerate or not data.get("summary"):
             model = require_llm()
-            take_review_state(req)
+            take_review_state(req, req.names)
             transcript, _ = render_reviewed_transcript(data)
             try:
                 data["summary"] = summarize(transcript, data.get("context_hint"), model)
@@ -278,7 +281,7 @@ def serve_review(
     def api_vault_propose(req: ApplyRequest) -> JSONResponse:
         root = require_vault()
         model = require_llm()
-        take_review_state(req)
+        take_review_state(req, req.names)
         markdown, _ = apply_review(data)
         proposal = propose_location(
             root, audio_path, markdown, data.get("names") or [], data.get("context_hint"), model
@@ -294,7 +297,7 @@ def serve_review(
         if labels_path.resolve() not in {src for src, _ in planned_moves(audio_path.resolve(), root, "x")}:
             detail = f"Sidecar {labels_path} isn't next to the audio; move it there first."
             raise HTTPException(status_code=409, detail=detail)
-        take_review_state(req)
+        take_review_state(req, req.names)
         write_outputs()
         try:
             moves = move_recording(audio_path, root, req.folder, req.basename)

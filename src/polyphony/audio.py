@@ -5,6 +5,10 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 TARGET_SAMPLE_RATE = 16_000
 
@@ -38,7 +42,7 @@ def convert_to_wav(src: Path, dst: Path) -> None:
     )
 
 
-def pick_device(requested: str | None) -> tuple[str, object]:
+def pick_device(requested: str | None) -> tuple[str, torch.dtype]:
     """Return (device_string, torch_dtype) with safe defaults per platform.
 
     MPS (Apple Silicon) has partial fp16 support that trips Whisper in

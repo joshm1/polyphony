@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -29,9 +30,9 @@ class WordFlag:
     suggested: str
     confidence: int
     reason: str = ""
-    alternatives: list[str] = field(default_factory=list)
+    alternatives: list[str] = field(default_factory=list[str])
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 

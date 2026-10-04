@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -52,7 +52,7 @@ Transcript:
 
 def summary_markdown(summary: dict[str, Any]) -> str:
     lines = ["## Summary", "", summary["tldr"], ""]
-    sections = [
+    sections: list[tuple[str, list[str]]] = [
         ("Key points", summary.get("key_points") or []),
         ("Decisions", summary.get("decisions") or []),
         # Checkbox items so they show up as tasks in Obsidian.
@@ -60,7 +60,7 @@ def summary_markdown(summary: dict[str, Any]) -> str:
             "Action items",
             [
                 f"[ ] **{a['owner']}**: {a['task']}" if a.get("owner") else f"[ ] {a['task']}"
-                for a in summary.get("action_items") or []
+                for a in cast(list[dict[str, Any]], summary.get("action_items") or [])
             ],
         ),
     ]

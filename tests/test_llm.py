@@ -15,7 +15,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-def test_auto_without_any_key_means_no_llm():
+def test_auto_without_any_key_means_no_llm() -> None:
     assert resolve_llm_model() is None
     assert resolve_llm_model("auto") is None
 
@@ -50,7 +50,7 @@ def test_env_can_disable_the_llm(monkeypatch: pytest.MonkeyPatch):
     assert resolve_llm_model() is None
 
 
-def test_check_llm_accepts_no_llm_and_rejects_unknown_providers():
+def test_check_llm_accepts_no_llm_and_rejects_unknown_providers() -> None:
     check_llm(None)
     with pytest.raises(LLMUnavailable):
         check_llm("no-such-provider:model")

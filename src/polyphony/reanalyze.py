@@ -95,7 +95,7 @@ def reanalyze(
     reviewed = [replace(lbl, override=overrides.get(lbl.chunk.idx)) for lbl in base]
     breaks = paragraphize(reviewed, model, context_hint=context_hint, source_audio=audio_path)
     new_flags = flag_asr_errors([lbl.chunk for lbl in base], model, context_hint=context_hint, source_audio=audio_path)
-    review = data.get("review") or {}
+    review: dict[str, Any] = data.get("review") or {}
     flags, decisions = merge_flags(
         data.get("asr_flags") or [], review.get("word_decisions") or {}, [flag_dict(f) for f in new_flags]
     )

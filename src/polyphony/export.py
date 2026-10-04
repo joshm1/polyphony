@@ -21,7 +21,7 @@ from .types import ChunkLabel
 ExportFormat = Literal["json", "csv", "srt", "vtt", "md"]
 EXPORT_FORMATS: tuple[ExportFormat, ...] = ("json", "csv", "srt", "vtt", "md")
 
-_CSV_COLUMNS = (
+_CSV_COLUMNS: tuple[str, ...] = (
     "idx",
     "start",
     "end",

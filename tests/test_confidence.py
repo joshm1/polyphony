@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 """The ensemble → confidence → review-flag path, end to end, with the LLM stubbed or absent."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -27,6 +29,13 @@ def _ch(idx: int, start: float, end: float, text: str = "x") -> Chunk:
     return Chunk(idx=idx, start=start, end=end, text=text)
 
 
+def _returns(value: object) -> Callable[..., Any]:
+    def stub(*_args: object, **_kwargs: object) -> object:
+        return value
+
+    return stub
+
+
 def _no_llm_calls(*_args: object, **_kwargs: object) -> Any:
     raise AssertionError("no LLM call expected")
 
@@ -34,7 +43,7 @@ def _no_llm_calls(*_args: object, **_kwargs: object) -> Any:
 # ---------- pyannote purity ----------
 
 
-def test_purity_is_share_of_speech_owned_by_majority_speaker():
+def test_purity_is_share_of_speech_owned_by_majority_speaker() -> None:
     segments = [
         PyannoteSegment(0.0, 3.0, "SPEAKER_00"),
         PyannoteSegment(3.0, 4.0, "SPEAKER_01"),
@@ -43,13 +52,13 @@ def test_purity_is_share_of_speech_owned_by_majority_speaker():
     assert pyannote_chunk_purity(chunks, segments) == [1.0, 0.5, None]
 
 
-def test_purity_ignores_silence_inside_a_chunk():
+def test_purity_ignores_silence_inside_a_chunk() -> None:
     # One speaker talking for 1s of a 4s chunk is still a pure chunk.
     segments = [PyannoteSegment(0.0, 1.0, "SPEAKER_00")]
     assert pyannote_chunk_purity([_ch(0, 0.0, 4.0)], segments) == [1.0]
 
 
-def test_single_signal_confidence_scales_and_clamps():
+def test_single_signal_confidence_scales_and_clamps() -> None:
     assert single_signal_confidence(None) == SINGLE_SIGNAL_CONFIDENCE
     assert single_signal_confidence(1.0) == SINGLE_SIGNAL_CONFIDENCE
     assert single_signal_confidence(0.5) == 35
@@ -60,7 +69,7 @@ def test_single_signal_confidence_scales_and_clamps():
 # ---------- reconcile without an LLM ----------
 
 
-def test_no_llm_uses_audio_labels_and_never_calls_the_reconciler(monkeypatch: pytest.MonkeyPatch):
+def test_no_llm_uses_audio_labels_and_never_calls_the_reconciler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("polyphony.reconcile.run_structured", _no_llm_calls)
     chunks = [_ch(0, 0, 1), _ch(1, 1, 2), _ch(2, 2, 3)]
     out = reconcile(chunks, [1, 2, None], [None, None, None], names=None, model=None, audio_purity=[1.0, 0.6, None])
@@ -72,27 +81,27 @@ def test_no_llm_uses_audio_labels_and_never_calls_the_reconciler(monkeypatch: py
     assert "no diarizer labeled this chunk" in out[2].note
 
 
-def test_no_llm_disagreement_falls_back_to_audio(monkeypatch: pytest.MonkeyPatch):
+def test_no_llm_disagreement_falls_back_to_audio(monkeypatch: pytest.MonkeyPatch) -> None:
     # Only reachable when labels came from elsewhere (e.g. a sidecar); the reconciler must still not run.
     monkeypatch.setattr("polyphony.reconcile.run_structured", _no_llm_calls)
     out = reconcile([_ch(0, 0, 1)], [1], [2], names=None, model=None)
     assert (out[0].final, out[0].confidence) == (1, FALLBACK_CONFIDENCE)
 
 
-def test_reconcile_rejects_misaligned_inputs():
+def test_reconcile_rejects_misaligned_inputs() -> None:
     with pytest.raises(ValueError, match="align"):
         reconcile([_ch(0, 0, 1)], [1, 2], [1], names=None, model=None)
     with pytest.raises(ValueError, match="audio_purity"):
         reconcile([_ch(0, 0, 1)], [1], [1], names=None, model=None, audio_purity=[])
 
 
-def test_agreement_beats_low_purity():
+def test_agreement_beats_low_purity() -> None:
     # Two independent signals agreeing outranks the audio diarizer's own mixed-chunk doubt.
     out = reconcile([_ch(0, 0, 1)], [1], [1], names=None, model=None, audio_purity=[0.4])
     assert out[0].confidence == AGREED_CONFIDENCE
 
 
-def test_reconciler_only_sees_disputes_and_keeps_chunk_order(monkeypatch: pytest.MonkeyPatch):
+def test_reconciler_only_sees_disputes_and_keeps_chunk_order(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
     def fake(prompt: str, *_args: object, **_kwargs: object) -> _Decisions:
@@ -113,20 +122,20 @@ def test_reconciler_only_sees_disputes_and_keeps_chunk_order(monkeypatch: pytest
 # ---------- the text diarizer ----------
 
 
-def test_diarize_llm_without_model_is_silent(monkeypatch: pytest.MonkeyPatch):
+def test_diarize_llm_without_model_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("polyphony.diarize.run_structured", _no_llm_calls)
     assert diarize_llm([_ch(0, 0, 1), _ch(1, 1, 2)], None, None) == [None, None]
 
 
-def test_diarize_llm_partial_answer_leaves_gaps_for_the_reconciler(monkeypatch: pytest.MonkeyPatch):
+def test_diarize_llm_partial_answer_leaves_gaps_for_the_reconciler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "polyphony.diarize.run_structured",
-        lambda *_a, **_k: _SpeakerAssignments(labels=[_SpeakerAssignment(id=0, speaker=2)]),
+        _returns(_SpeakerAssignments(labels=[_SpeakerAssignment(id=0, speaker=2)])),
     )
     assert diarize_llm([_ch(0, 0, 1), _ch(1, 1, 2)], None, "test") == [2, None]
 
 
-def test_diarize_llm_failure_is_silent_not_fatal(monkeypatch: pytest.MonkeyPatch):
+def test_diarize_llm_failure_is_silent_not_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: object, **_kwargs: object) -> Any:
         raise RuntimeError("rate limited")
 
@@ -147,20 +156,18 @@ def _words() -> list[Word]:
     return [Word(text=t, start=i * 0.5, end=i * 0.5 + 0.4, speaker=s) for i, (t, s) in enumerate(spoken)]
 
 
-def test_pipeline_flags_disputed_turns_and_review_clears_them(monkeypatch: pytest.MonkeyPatch):
+def test_pipeline_flags_disputed_turns_and_review_clears_them(monkeypatch: pytest.MonkeyPatch) -> None:
     chunks, audio = words_to_chunks(_words())
     assert audio == [1, 2, 1, 2]
 
     # The text side agrees except on "Really?", which it gives to speaker 2.
     monkeypatch.setattr(
         "polyphony.diarize.run_structured",
-        lambda *_a, **_k: _SpeakerAssignments(
-            labels=[_SpeakerAssignment(id=i, speaker=s) for i, s in enumerate([1, 2, 2, 2])]
-        ),
+        _returns(_SpeakerAssignments(labels=[_SpeakerAssignment(id=i, speaker=s) for i, s in enumerate([1, 2, 2, 2])])),
     )
     monkeypatch.setattr(
         "polyphony.reconcile.run_structured",
-        lambda *_a, **_k: _Decisions(decisions=[_Decision(id=2, speaker=2, confidence=45, reason="reads as a reply")]),
+        _returns(_Decisions(decisions=[_Decision(id=2, speaker=2, confidence=45, reason="reads as a reply")])),
     )
     names = ["Ana", "Ben"]
     labels = reconcile(chunks, audio, diarize_llm(chunks, names, "test"), names, model="test")
@@ -190,7 +197,7 @@ def test_pipeline_flags_disputed_turns_and_review_clears_them(monkeypatch: pytes
     assert reviewed == "Ana: So what happened?\n\nBen: We shipped it.\n\nAna: Really?\n\nBen: Yes.\n"
 
 
-def test_pipeline_without_llm_still_produces_reviewable_output(monkeypatch: pytest.MonkeyPatch):
+def test_pipeline_without_llm_still_produces_reviewable_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("polyphony.diarize.run_structured", _no_llm_calls)
     monkeypatch.setattr("polyphony.reconcile.run_structured", _no_llm_calls)
     chunks, audio = words_to_chunks(_words())

@@ -59,7 +59,9 @@ def apply_corrections(text: str, corrections: list[tuple[str, str]]) -> tuple[st
 
 
 def overrides_of(data: dict[str, Any]) -> dict[int, int]:
-    return {int(k): int(v) for k, v in ((data.get("review") or {}).get("overrides") or {}).items()}
+    review: dict[str, Any] = data.get("review") or {}
+    overrides: dict[str, Any] = review.get("overrides") or {}
+    return {int(k): int(v) for k, v in overrides.items()}
 
 
 def labels_from_payload(data: dict[str, Any]) -> list[ChunkLabel]:
@@ -92,9 +94,8 @@ def reviewed_labels(data: dict[str, Any]) -> tuple[list[ChunkLabel], list[dict[s
     no longer appears in its chunk.
     """
     overrides = overrides_of(data)
-    corrections = resolve_corrections(
-        data.get("asr_flags") or [], (data.get("review") or {}).get("word_decisions") or {}
-    )
+    review: dict[str, Any] = data.get("review") or {}
+    corrections = resolve_corrections(data.get("asr_flags") or [], review.get("word_decisions") or {})
     labels: list[ChunkLabel] = []
     skipped: list[dict[str, Any]] = []
     for lbl in labels_from_payload(data):

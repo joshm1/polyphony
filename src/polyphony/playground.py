@@ -7,6 +7,7 @@ source of truth for that contract — keep it in sync with
 """
 
 from pathlib import Path
+from typing import Any
 
 from .asr_correction import WordFlag
 from .types import ChunkLabel
@@ -24,7 +25,7 @@ def playground_payload(
     llm_model: str | None,
     context_hint: str | None,
     audio_url: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Assemble the JSON payload the React app reads on load.
 
     `audio_url` is left empty at write-time — the serve layer injects
@@ -64,7 +65,7 @@ def playground_payload(
     }
 
 
-def flag_dict(f: WordFlag) -> dict:
+def flag_dict(f: WordFlag) -> dict[str, Any]:
     return {
         "chunk_idx": f.chunk_idx,
         "original": f.original,

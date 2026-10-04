@@ -21,14 +21,18 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # All extras so pyright resolves the local backend's imports too.
       - name: Install Python dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --all-extras
 
       - name: Lint
         run: uv run ruff check src tests
 
       - name: Format check
         run: uv run ruff format --check src tests
+
+      - name: Type check (pyright strict)
+        run: uv run pyright
 
       - name: Python tests
         run: uv run pytest -v

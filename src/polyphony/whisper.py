@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from .cache import load_whisper, save_whisper
 from .types import Chunk
 
+if TYPE_CHECKING:
+    import torch
+
 WHISPER_MODEL_ID = "openai/whisper-large-v3-turbo"
 
 
-def transcribe(audio_path: Path, device: str, dtype, source_audio: Path | None = None) -> list[Chunk]:
+def transcribe(audio_path: Path, device: str, dtype: torch.dtype, source_audio: Path | None = None) -> list[Chunk]:
     """Run Whisper-large-v3-turbo with chunk-level timestamps.
 
     We request chunk-level rather than word-level timestamps because
@@ -32,14 +36,17 @@ def transcribe(audio_path: Path, device: str, dtype, source_audio: Path | None =
     from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
     logger.info(f"Loading Whisper ({WHISPER_MODEL_ID}) on {device}…")
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        WHISPER_MODEL_ID,
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        use_safetensors=True,
+    model = cast(
+        Any,
+        AutoModelForSpeechSeq2Seq.from_pretrained(  # pyright: ignore[reportUnknownMemberType]
+            WHISPER_MODEL_ID,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            use_safetensors=True,
+        ),
     )
     model.to(device)
-    processor = AutoProcessor.from_pretrained(WHISPER_MODEL_ID)
+    processor = cast(Any, AutoProcessor.from_pretrained(WHISPER_MODEL_ID))  # pyright: ignore[reportUnknownMemberType]
 
     pipe = pipeline(
         "automatic-speech-recognition",
@@ -53,7 +60,7 @@ def transcribe(audio_path: Path, device: str, dtype, source_audio: Path | None =
     )
 
     logger.info(f"Transcribing {audio_path.name}…")
-    result = pipe(str(audio_path), return_timestamps=True)
+    result = cast(dict[str, Any], pipe(str(audio_path), return_timestamps=True))
 
     chunks: list[Chunk] = []
     for c in result.get("chunks", []):

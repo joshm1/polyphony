@@ -69,6 +69,7 @@ wheel-include = ["src/polyphony/static/**"]
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.400",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
@@ -89,6 +90,11 @@ select = [
 ignore = [
     "B008",  # click uses function calls in defaults
 ]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

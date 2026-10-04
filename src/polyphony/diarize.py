@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -19,6 +20,9 @@ from pydantic import BaseModel, Field
 from .cache import load_pyannote, save_pyannote
 from .llm import run_structured
 from .types import Chunk, PyannoteSegment
+
+if TYPE_CHECKING:
+    from pyannote.audio import Pipeline
 
 PYANNOTE_MODEL_ID = "pyannote/speaker-diarization-3.1"
 
@@ -42,7 +46,7 @@ class PyannoteUnavailable(RuntimeError):
     """Raised when pyannote can't be loaded (missing token, unaccepted license, etc.)."""
 
 
-def _load_pyannote_pipeline(token: str):
+def _load_pyannote_pipeline(token: str) -> Pipeline:
     """Load the diarization pipeline, raising PyannoteUnavailable with a clear message on failure."""
     try:
         from pyannote.audio import Pipeline
@@ -51,10 +55,10 @@ def _load_pyannote_pipeline(token: str):
 
     # newer pyannote/huggingface_hub renamed `use_auth_token` → `token`; try both.
     try:
-        pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL_ID, token=token)
+        pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL_ID, token=token)  # pyright: ignore[reportUnknownMemberType]
     except TypeError:
         try:
-            pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL_ID, use_auth_token=token)
+            pipeline = cast(Any, Pipeline).from_pretrained(PYANNOTE_MODEL_ID, use_auth_token=token)
         except Exception as e:
             raise PyannoteUnavailable(_license_hint(e)) from e
     except Exception as e:
@@ -128,7 +132,7 @@ def _run_pyannote(audio_path: Path, device: str, source_audio: Path | None = Non
         pipeline.to(torch.device(diar_device))
 
     logger.info(f"Diarizing {audio_path.name} on {diar_device}…")
-    result = pipeline(str(audio_path))
+    result: Any = pipeline(str(audio_path))
 
     # pyannote 3.0 returned an Annotation directly; 3.1+ wraps it in a
     # DiarizeOutput (Annotation lives on `.speaker_diarization`). Support both.

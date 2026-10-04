@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the pure-logic reconciliation + transcript-rendering paths.
 
 LLM calls are mocked at the `run_structured` boundary; we only exercise the
@@ -8,20 +9,32 @@ behavior are integration-tested by running polyphony on real audio.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+
 from polyphony.asr_correction import _Flag, _to_word_flags
 from polyphony.backends.assemblyai import Word, words_to_chunks
 from polyphony.diarize import _labels_by_chunk, _SpeakerAssignment
 from polyphony.paragraphize import _apply_breaks_to_turns, _clean_break_ids
 from polyphony.reconcile import _Decision, _Decisions, _decisions_by_chunk, reconcile
-from polyphony.transcript import _group_into_turns
+from polyphony.transcript import group_into_turns
 from polyphony.types import Chunk, ChunkLabel
+
+
+def _returns(value: object) -> Callable[..., Any]:
+    def stub(*_args: object, **_kwargs: object) -> object:
+        return value
+
+    return stub
 
 
 def _ch(idx: int, text: str = "x") -> Chunk:
     return Chunk(idx=idx, start=float(idx), end=float(idx + 1), text=text)
 
 
-def test_full_agreement_skips_reconciler():
+def test_full_agreement_skips_reconciler() -> None:
     chunks = [_ch(0), _ch(1), _ch(2)]
     out = reconcile(chunks, [1, 2, 1], [1, 2, 1], names=None, model="test")
     assert [lbl.final for lbl in out] == [1, 2, 1]
@@ -29,7 +42,7 @@ def test_full_agreement_skips_reconciler():
     assert all(lbl.note == "both backends agreed" for lbl in out)
 
 
-def test_one_silent_backend_uses_other_with_medium_confidence():
+def test_one_silent_backend_uses_other_with_medium_confidence() -> None:
     chunks = [_ch(0), _ch(1)]
     # audio diarizer silent on chunk 0; LLM silent on chunk 1
     out = reconcile(chunks, [None, 2], [1, None], names=None, model="test")
@@ -41,7 +54,7 @@ def test_one_silent_backend_uses_other_with_medium_confidence():
     assert "audio" in out[1].note
 
 
-def test_decisions_by_chunk_drops_non_disputed_ids():
+def test_decisions_by_chunk_drops_non_disputed_ids() -> None:
     decisions = [
         _Decision(id=0, speaker=1, confidence=88, reason="asks question"),
         _Decision(id=3, speaker=2, confidence=60),
@@ -51,8 +64,8 @@ def test_decisions_by_chunk_drops_non_disputed_ids():
     assert out[0].reason == "asks question"
 
 
-def test_reconciler_failure_falls_back_heuristically(monkeypatch):
-    def boom(*_args, **_kwargs):
+def test_reconciler_failure_falls_back_heuristically(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_args: object, **_kwargs: object) -> Any:
         raise RuntimeError("network down")
 
     monkeypatch.setattr("polyphony.reconcile.run_structured", boom)
@@ -63,16 +76,16 @@ def test_reconciler_failure_falls_back_heuristically(monkeypatch):
     assert out[1].confidence == 70
 
 
-def test_reconciler_applies_llm_decisions(monkeypatch):
+def test_reconciler_applies_llm_decisions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "polyphony.reconcile.run_structured",
-        lambda *_a, **_k: _Decisions(decisions=[_Decision(id=0, speaker=2, confidence=81, reason="answers Q")]),
+        _returns(_Decisions(decisions=[_Decision(id=0, speaker=2, confidence=81, reason="answers Q")])),
     )
     out = reconcile([_ch(0)], [1], [2], names=None, model="test")
     assert (out[0].final, out[0].confidence, out[0].note) == (2, 81, "answers Q")
 
 
-def test_llm_labels_drop_out_of_range_entries():
+def test_llm_labels_drop_out_of_range_entries() -> None:
     entries = [
         _SpeakerAssignment(id=0, speaker=1),
         _SpeakerAssignment(id=1, speaker=5),  # beyond max_speaker
@@ -81,7 +94,7 @@ def test_llm_labels_drop_out_of_range_entries():
     assert _labels_by_chunk(entries, expected_len=3, max_speaker=2) == [1, None, None]
 
 
-def test_asr_flags_drop_unknown_chunks():
+def test_asr_flags_drop_unknown_chunks() -> None:
     entries = [
         _Flag(chunk_id=4, original="sauce", suggested="SaaS", confidence=92),
         _Flag(chunk_id=99, original="x", suggested="y", confidence=90),
@@ -98,11 +111,11 @@ def _lbl(idx: int, final: int, text: str = "x") -> ChunkLabel:
     return ChunkLabel(chunk=ch, audio=final, llm=final, final=final, confidence=100)
 
 
-def test_clean_break_ids_filters_dedupes_and_sorts():
+def test_clean_break_ids_filters_dedupes_and_sorts() -> None:
     assert _clean_break_ids([7, 3, 999, 7, -1, 12], valid_ids={3, 7, 12}) == [3, 7, 12]
 
 
-def test_clean_break_ids_allows_no_breaks():
+def test_clean_break_ids_allows_no_breaks() -> None:
     # Valid output meaning "nothing needs breaking" — not a failure.
     assert _clean_break_ids([], valid_ids={0, 1}) == []
 
@@ -124,23 +137,23 @@ _LONG_C = (
 )
 
 
-def test_apply_breaks_single_turn_multiple_paragraphs():
+def test_apply_breaks_single_turn_multiple_paragraphs() -> None:
     labels = [_lbl(0, 1, _LONG_A), _lbl(1, 1, _LONG_B), _lbl(2, 1, _LONG_C)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [0])
     assert paras == [[_LONG_A, f"{_LONG_B} {_LONG_C}"]]
 
 
-def test_apply_breaks_ignores_turn_boundary_breaks():
+def test_apply_breaks_ignores_turn_boundary_breaks() -> None:
     labels = [_lbl(0, 1, _LONG_A), _lbl(1, 2, _LONG_B), _lbl(2, 2, _LONG_C)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [0])
     assert paras == [[_LONG_A], [f"{_LONG_B} {_LONG_C}"]]
 
 
-def test_apply_breaks_no_breaks_joins_chunks():
+def test_apply_breaks_no_breaks_joins_chunks() -> None:
     labels = [_lbl(0, 1, _LONG_A), _lbl(1, 1, _LONG_B), _lbl(2, 1, _LONG_C)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [])
     assert paras == [[f"{_LONG_A} {_LONG_B} {_LONG_C}"]]
 
@@ -148,42 +161,42 @@ def test_apply_breaks_no_breaks_joins_chunks():
 # ---------- transcript._polish_paragraphs (stranded merge + oversize split) ----------
 
 
-def test_polish_merges_stranded_trailing_fragment():
+def test_polish_merges_stranded_trailing_fragment() -> None:
     # Long setup + short punchline → merged into one paragraph.
     setup = _LONG_A
     punchline = "We made it up."  # 14 chars, way under the 120c threshold
     labels = [_lbl(0, 1, setup), _lbl(1, 1, punchline)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [0])
     assert paras == [[f"{setup} {punchline}"]]
 
 
-def test_polish_leaves_long_trailing_paragraph_alone():
+def test_polish_leaves_long_trailing_paragraph_alone() -> None:
     # Trailing paragraph > 120c → not stranded, kept as its own paragraph.
     labels = [_lbl(0, 1, _LONG_A), _lbl(1, 1, _LONG_B)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [0])
     assert paras == [[_LONG_A, _LONG_B]]
 
 
-def test_polish_splits_oversized_paragraph_at_discourse_marker():
+def test_polish_splits_oversized_paragraph_at_discourse_marker() -> None:
     # One 1500+ char paragraph with a clear ". And then " in the middle →
     # gets split there, producing two paragraphs.
     left_half = "Something about the history of accounting goes here, " * 12
     right_half = "something about the modern state of accounting goes here, " * 12
     text = left_half.rstrip(", ") + ". And then " + right_half.rstrip(", ") + "."
     labels = [_lbl(0, 1, text)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [])
     assert len(paras[0]) >= 2
     assert all(len(p) <= 1100 for p in paras[0]), f"got lengths {[len(p) for p in paras[0]]}"
 
 
-def test_polish_leaves_oversized_without_marker_alone():
+def test_polish_leaves_oversized_without_marker_alone() -> None:
     # No discourse markers at all → we don't mid-sentence split.
     text = ("word " * 300).strip()  # ~1500 chars, no periods/markers
     labels = [_lbl(0, 1, text)]
-    turns = _group_into_turns(labels, review_threshold=100)
+    turns = group_into_turns(labels, review_threshold=100)
     paras = _apply_breaks_to_turns(turns, [])
     assert paras == [[text]]
 
@@ -195,7 +208,7 @@ def _w(text: str, speaker: str, t: float) -> Word:
     return Word(text=text, start=t, end=t + 0.5, speaker=speaker)
 
 
-def test_words_to_chunks_splits_on_sentence_end_and_speaker_change():
+def test_words_to_chunks_splits_on_sentence_end_and_speaker_change() -> None:
     words = [
         _w("Hi", "B", 0), _w("there.", "B", 1), _w("How", "B", 2), _w("are", "B", 3),
         _w("Good", "A", 4), _w("thanks!", "A", 5),
@@ -211,7 +224,7 @@ def test_words_to_chunks_splits_on_sentence_end_and_speaker_change():
 # ---------- backends.resolve_backend ----------
 
 
-def test_auto_prefers_assemblyai_when_key_set(monkeypatch):
+def test_auto_prefers_assemblyai_when_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
     from polyphony.backends import resolve_backend
 
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "k")

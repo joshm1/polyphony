@@ -18,6 +18,7 @@ oversized even after compression are rejected with a clear error.
 
 from __future__ import annotations
 
+import importlib
 import json
 import mimetypes
 import re
@@ -26,12 +27,16 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from ..gemini_client import GeminiClientInfo, make_gemini_client
 from ..types import Chunk, ChunkLabel
 from .base import Backend, BackendConfig, BackendUnavailable
+
+if TYPE_CHECKING:
+    from google.genai import types
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_LOCATION = "us-east1"
@@ -61,7 +66,7 @@ class GeminiBackend(Backend):
         # failure surfaces quickly at the first API call anyway, and actively
         # probing ADC costs a round-trip we don't need.
         try:
-            import google.genai  # noqa: F401
+            importlib.import_module("google.genai")
         except ImportError as e:
             raise BackendUnavailable(f"google-genai not installed: {e}") from e
 
@@ -84,7 +89,6 @@ class GeminiBackend(Backend):
                 audio_path,
                 info,
                 cfg.gcs_bucket,
-                types,
                 Path(td),
             )
 
@@ -152,9 +156,8 @@ class GeminiBackend(Backend):
         audio_path: Path,
         info: GeminiClientInfo,
         bucket: str | None,
-        types,
         tmpdir: Path,
-    ):
+    ) -> types.Part:
         """Return a Part for the audio, compressing first if it won't fit inline.
 
         Strategy: always prefer the inline path (no network upload, no GCS
@@ -164,6 +167,8 @@ class GeminiBackend(Backend):
         a GCS upload if an explicit bucket is configured AND compression
         still can't shrink the file under the cap.
         """
+        from google.genai import types
+
         size = audio_path.stat().st_size
         mime = _guess_mime(audio_path)
 
@@ -209,7 +214,7 @@ class GeminiBackend(Backend):
         return types.Part.from_uri(file_uri=uri, mime_type="audio/ogg")
 
     def _build_prompt(self, names: list[str] | None, context_hint: str | None) -> str:
-        speaker_lines = []
+        speaker_lines: list[str] = []
         if names:
             for i, name in enumerate(names, start=1):
                 speaker_lines.append(f"  Speaker {i} = {name}")
@@ -261,7 +266,7 @@ A "turn" is a continuous utterance by one speaker. Short interjections ("right",
             raise RuntimeError(f"Gemini output was not a JSON array: {type(data).__name__}")
 
         turns: list[_Turn] = []
-        for entry in data:
+        for entry in cast(list[object], data):
             turn = _turn_from_entry(entry)
             if turn is not None:
                 turns.append(turn)
@@ -290,21 +295,28 @@ A "turn" is a continuous utterance by one speaker. Short interjections ("right",
         return labels
 
 
-def _turn_from_entry(entry) -> _Turn | None:
+def _turn_from_entry(entry: object) -> _Turn | None:
     """Coerce a single Gemini output entry into a _Turn. Accepts positional arrays and dicts."""
-    if isinstance(entry, list) and len(entry) >= 2:
+    spk: object
+    text: object
+    start: object
+    end: object
+    conf: Any
+    fields = cast(list[object], entry) if isinstance(entry, list) else None
+    if fields is not None and len(fields) >= 2:
         # positional: [speaker, text, start?, end?, confidence?]
-        spk = entry[0]
-        text = entry[1]
-        start = entry[2] if len(entry) > 2 else None
-        end = entry[3] if len(entry) > 3 else None
-        conf = entry[4] if len(entry) > 4 else 80
+        spk = fields[0]
+        text = fields[1]
+        start = fields[2] if len(fields) > 2 else None
+        end = fields[3] if len(fields) > 3 else None
+        conf = fields[4] if len(fields) > 4 else 80
     elif isinstance(entry, dict):
-        spk = entry.get("speaker")
-        text = entry.get("text")
-        start = entry.get("start_sec")
-        end = entry.get("end_sec")
-        conf = entry.get("confidence", 80)
+        obj = cast(dict[str, Any], entry)
+        spk = obj.get("speaker")
+        text = obj.get("text")
+        start = obj.get("start_sec")
+        end = obj.get("end_sec")
+        conf = obj.get("confidence", 80)
     else:
         return None
 

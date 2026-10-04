@@ -22,7 +22,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from .llm import run_structured
-from .transcript import _group_into_turns, _Turn
+from .transcript import Turn, group_into_turns
 from .types import ChunkLabel
 
 _STRANDED_TAIL_MAX_CHARS = 120
@@ -95,8 +95,8 @@ def paragraphize(
 
 
 def paragraphs_for(labels: list[ChunkLabel], break_ids: list[int]) -> list[list[str]]:
-    """Per-turn paragraphs (aligned with `_group_into_turns`) for `build_transcript`."""
-    return _apply_breaks_to_turns(_group_into_turns(labels, review_threshold=100), break_ids)
+    """Per-turn paragraphs (aligned with `group_into_turns`) for `build_transcript`."""
+    return _apply_breaks_to_turns(group_into_turns(labels, review_threshold=100), break_ids)
 
 
 # ---------- prompt ----------
@@ -175,7 +175,7 @@ def _clean_break_ids(raw_ids: list[int], valid_ids: set[int]) -> list[int]:
 # ---------- apply + polish ----------
 
 
-def _apply_breaks_to_turns(turns: list[_Turn], break_ids: list[int]) -> list[list[str]]:
+def _apply_breaks_to_turns(turns: list[Turn], break_ids: list[int]) -> list[list[str]]:
     breaks = set(break_ids)
     out: list[list[str]] = []
     for t in turns:

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from polyphony.filing import clean_basename, inside_vault, move_recording, obsidian_url
 
 
-def _recording(tmp_path):
+def _recording(tmp_path: Path) -> tuple[Path, Path]:
     src = tmp_path / "Downloads"
     src.mkdir()
     audio = src / "Voice Memo [x].m4a"  # glob metacharacters must not break sibling matching
@@ -26,19 +27,19 @@ def _recording(tmp_path):
     return audio, vault
 
 
-def test_inside_vault_rejects_escape(tmp_path):
+def test_inside_vault_rejects_escape(tmp_path: Path) -> None:
     assert inside_vault(tmp_path, "a/b") == (tmp_path / "a/b").resolve()
     with pytest.raises(ValueError):
         inside_vault(tmp_path, "../elsewhere")
 
 
-def test_clean_basename_strips_path_characters():
+def test_clean_basename_strips_path_characters() -> None:
     assert clean_basename(" 2026-09-23 Visit: follow/up ") == "2026-09-23 Visit- follow-up"
     with pytest.raises(ValueError):
         clean_basename(" . ")
 
 
-def test_move_recording_renames_everything_and_rewrites_sidecar(tmp_path):
+def test_move_recording_renames_everything_and_rewrites_sidecar(tmp_path: Path) -> None:
     audio, vault = _recording(tmp_path)
     moves = move_recording(audio, vault, "Health/Visits", "2026-09-23 Follow-up")
     dest = vault / "Health" / "Visits" / "2026-09-23 Follow-up"
@@ -55,7 +56,7 @@ def test_move_recording_renames_everything_and_rewrites_sidecar(tmp_path):
     assert sidecar["transcript_path"] == str(dest / "2026-09-23 Follow-up.assemblyai.transcript.md")
 
 
-def test_move_recording_refuses_a_non_empty_recording_folder(tmp_path):
+def test_move_recording_refuses_a_non_empty_recording_folder(tmp_path: Path) -> None:
     audio, vault = _recording(tmp_path)
     (vault / "Notes" / "Taken").mkdir(parents=True)
     (vault / "Notes" / "Taken" / "other.md").write_text("existing")
@@ -64,12 +65,12 @@ def test_move_recording_refuses_a_non_empty_recording_folder(tmp_path):
     assert audio.exists()  # nothing moved
 
 
-def test_obsidian_url_is_vault_relative(tmp_path):
+def test_obsidian_url_is_vault_relative(tmp_path: Path) -> None:
     note = tmp_path / "Health" / "a b.md"
     assert obsidian_url(tmp_path, note) == f"obsidian://open?vault={tmp_path.name}&file=Health/a%20b.md"
 
 
-def test_refiling_removes_the_emptied_recording_folder(tmp_path):
+def test_refiling_removes_the_emptied_recording_folder(tmp_path: Path) -> None:
     from polyphony.filing import is_filed
 
     audio, vault = _recording(tmp_path)
@@ -81,7 +82,7 @@ def test_refiling_removes_the_emptied_recording_folder(tmp_path):
     assert is_filed(vault, vault / "Family" / "2026-09-23 Visit Results" / "2026-09-23 Visit Results.m4a")
 
 
-def test_loose_file_in_vault_is_not_filed(tmp_path):
+def test_loose_file_in_vault_is_not_filed(tmp_path: Path) -> None:
     from polyphony.filing import is_filed
 
     (tmp_path / "Visits").mkdir()

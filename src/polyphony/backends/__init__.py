@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 
 from ..diarize import get_hf_token
@@ -27,7 +28,7 @@ def resolve_backend(choice: str) -> Backend:
         if os.environ.get(ASSEMBLYAI_API_KEY_ENV):
             return AssemblyAIBackend()
         try:
-            import google.genai  # noqa: F401
+            importlib.import_module("google.genai")
 
             return GeminiBackend()
         except ImportError:
