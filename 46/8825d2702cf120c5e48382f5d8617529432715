@@ -1,0 +1,19 @@
+src/polyphony/export.py
+  s_a72c7666b25d63::t_23f6df6d185a87 15,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "468825d2702cf120c5e48382f5d8617529432715",
+  "prompts": {},
+  "sessions": {
+    "s_a72c7666b25d63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "541042ad-9179-4636-ae9f-db0c9fb0ec04",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Josh McDade <josh.ncsu@gmail.com>"
+    }
+  }
+}
