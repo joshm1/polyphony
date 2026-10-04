@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib
 import json
 import mimetypes
+import os
 import re
 import shutil
 import subprocess
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
-from ..gemini_client import GeminiClientInfo, make_gemini_client
+from ..gemini_client import GeminiClientInfo, gemini_api_key, make_gemini_client
 from ..types import Chunk, ChunkLabel
 from .base import Backend, BackendConfig, BackendUnavailable
 
@@ -69,6 +70,11 @@ class GeminiBackend(Backend):
             importlib.import_module("google.genai")
         except ImportError as e:
             raise BackendUnavailable(f"google-genai not installed: {e}") from e
+        if not gemini_api_key() and not (cfg.project or os.environ.get("GOOGLE_CLOUD_PROJECT")):
+            raise BackendUnavailable(
+                "No Gemini credentials: export $GEMINI_API_KEY, or pass --project / export $GOOGLE_CLOUD_PROJECT "
+                "(plus `gcloud auth application-default login`) for Vertex AI."
+            )
 
     def run(self, audio_path: Path, cfg: BackendConfig) -> list[ChunkLabel]:
         from google.genai import types

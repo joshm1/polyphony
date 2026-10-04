@@ -31,15 +31,28 @@ from ..whisper import transcribe
 from .base import Backend, BackendConfig, BackendUnavailable
 
 
+def missing_local_dependencies() -> list[str]:
+    """Modules from the `local` extra that aren't importable."""
+    missing: list[str] = []
+    for module in ("torch", "transformers", "pyannote.audio"):
+        try:
+            found = find_spec(module) is not None
+        except ModuleNotFoundError:  # the parent package of a dotted name is missing
+            found = False
+        if not found:
+            missing.append(module)
+    return missing
+
+
 class LocalEnsembleBackend(Backend):
     name = "local"
 
     def preflight(self, cfg: BackendConfig) -> None:
-        missing = [mod for mod in ("torch", "transformers", "pyannote.audio") if find_spec(mod.split(".")[0]) is None]
-        if missing:
+        if missing := missing_local_dependencies():
             raise BackendUnavailable(
                 f"The local backend needs {', '.join(missing)}. Install polyphony with the `local` extra, "
-                'e.g. `uv tool install "polyphony[local] @ git+https://github.com/joshm1/polyphony"`.'
+                'e.g. `uv tool install "polyphony[local] @ git+https://github.com/joshm1/polyphony"`, '
+                "or use a hosted backend by setting $ASSEMBLYAI_API_KEY or $GEMINI_API_KEY."
             )
         try:
             preflight_pyannote()

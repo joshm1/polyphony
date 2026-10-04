@@ -227,7 +227,13 @@ def test_words_to_chunks_splits_on_sentence_end_and_speaker_change() -> None:
 def test_auto_prefers_assemblyai_when_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
     from polyphony.backends import resolve_backend
 
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
     assert resolve_backend("auto").name == "assemblyai"
     monkeypatch.delenv("ASSEMBLYAI_API_KEY")
     assert resolve_backend("auto").name == "gemini"
+    # No hosted credentials: everything runs locally.
+    monkeypatch.delenv("GEMINI_API_KEY")
+    assert resolve_backend("auto").name == "local"

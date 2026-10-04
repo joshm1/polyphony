@@ -108,7 +108,7 @@ polyphony export interview.m4a --format csv
 | `local` | Whisper large-v3-turbo + pyannote 3.1, cross-checked by the text diarizer | **No** | the `local` extra, a Hugging Face token |
 | `gemini` | One Gemini call does both | Yes, to Google | `$GEMINI_API_KEY`, or Vertex AI credentials |
 
-`--backend auto` (the default) uses AssemblyAI when `$ASSEMBLYAI_API_KEY` is set, otherwise Gemini. The Gemini backend rates its own confidence per turn but has no second signal to cross-check, so `assemblyai` and `local` give the more meaningful scores.
+`--backend auto` (the default) uses AssemblyAI when `$ASSEMBLYAI_API_KEY` is set, then Gemini when it has credentials, and otherwise `local`. The Gemini backend rates its own confidence per turn but has no second signal to cross-check, so `assemblyai` and `local` give the more meaningful scores.
 
 The `local` backend needs a [Hugging Face token](https://huggingface.co/settings/tokens) in `$HF_TOKEN` with both pyannote licenses accepted: [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0). Expect roughly 10 minutes of Whisper per hour of audio on Apple Silicon and longer for pyannote on CPU; both results are cached.
 
@@ -118,7 +118,7 @@ The text-side passes (text diarization, tie-breaking, paragraphing, ASR-error fl
 
 | Value | Uses |
 | --- | --- |
-| `auto` (default) | The first of `$OPENAI_API_KEY`, `$ANTHROPIC_API_KEY`, `$GOOGLE_API_KEY` that is set |
+| `auto` (default) | The first of `$OPENAI_API_KEY`, `$ANTHROPIC_API_KEY`, `$GOOGLE_API_KEY` (or `$GEMINI_API_KEY`) that is set |
 | `openai`, `anthropic`, `google` | That provider's default model |
 | `openai-codex` | A ChatGPT subscription, via the credentials `codex login` stores |
 | `provider:model` | Any pydantic-ai model string, e.g. `anthropic:claude-opus-5` or `ollama:qwen3` (set `$OLLAMA_BASE_URL`) for a model on your own hardware |
@@ -126,7 +126,7 @@ The text-side passes (text diarization, tie-breaking, paragraphing, ASR-error fl
 
 **Without an LLM**, polyphony still works: speakers come from the audio diarizer alone and every chunk is capped at 70, lower where pyannote saw a speaker change inside the chunk. Paragraphing and ASR-error flags are skipped, and the UI disables re-analysis and summaries. Raise `--review-threshold` (e.g. 75) to send every turn through review. Combined with `--backend local`, nothing leaves your machine.
 
-Only transcript text is sent to the LLM, never audio.
+The text passes never receive audio: they see transcript text, speaker names, and your context hint (vault filing also sees your vault's folder and file names).
 
 ---
 
@@ -135,7 +135,7 @@ Only transcript text is sent to the LLM, never audio.
 | Variable | Purpose |
 | --- | --- |
 | `POLYPHONY_LLM_MODEL` | Default for `--llm-model` |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | LLM provider keys picked up by `auto` |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | LLM provider keys picked up by `auto` (`GEMINI_API_KEY` also counts for Google) |
 | `ASSEMBLYAI_API_KEY` | AssemblyAI backend |
 | `HF_TOKEN` | Hugging Face token for pyannote (`local` backend) |
 | `GEMINI_API_KEY` | Gemini backend via the Gemini API; without it, Vertex AI via ADC |

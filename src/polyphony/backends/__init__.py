@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 
-from ..diarize import get_hf_token
+from ..gemini_client import gemini_api_key
 from .assemblyai import API_KEY_ENV as ASSEMBLYAI_API_KEY_ENV
 from .assemblyai import AssemblyAIBackend
 from .base import Backend, BackendConfig, BackendUnavailable
 from .gemini import GeminiBackend
-from .local import LocalEnsembleBackend
+from .local import LocalEnsembleBackend, missing_local_dependencies
 
 BACKENDS: dict[str, type[Backend]] = {
     "local": LocalEnsembleBackend,
@@ -20,23 +19,17 @@ BACKENDS: dict[str, type[Backend]] = {
 
 
 def resolve_backend(choice: str) -> Backend:
-    """Instantiate a backend by name. 'auto' picks the fastest usable one."""
+    """Instantiate a backend by name. 'auto' picks the fastest one with credentials configured."""
     if choice == "auto":
-        # AssemblyAI wins when its key is set: it's the only fast path that
-        # keeps the audio + text ensemble. Then Gemini when google-genai imports;
-        # else local (which has its own preflight to report license/token issues).
+        # AssemblyAI first: it's the only fast path that keeps the audio + text
+        # ensemble. Then Gemini when it has credentials (a GCP project alone only
+        # counts if local can't run). Otherwise local, whose preflight explains
+        # what's missing and names the hosted alternatives.
         if os.environ.get(ASSEMBLYAI_API_KEY_ENV):
             return AssemblyAIBackend()
-        try:
-            importlib.import_module("google.genai")
-
+        if gemini_api_key() or (os.environ.get("GOOGLE_CLOUD_PROJECT") and missing_local_dependencies()):
             return GeminiBackend()
-        except ImportError:
-            pass
-        if get_hf_token():
-            return LocalEnsembleBackend()
-        # Neither fully ready — still return gemini (clearer error than a half-local path).
-        return GeminiBackend()
+        return LocalEnsembleBackend()
 
     cls = BACKENDS.get(choice)
     if cls is None:
