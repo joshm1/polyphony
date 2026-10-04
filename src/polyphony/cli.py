@@ -10,6 +10,7 @@ to the adapters in polyphony.backends.*. This file stays focused on:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ from loguru import logger
 from .asr_correction import flag_asr_errors
 from .backends import BACKENDS, BackendUnavailable, resolve_backend
 from .backends.base import BackendConfig
+from .export import EXPORT_FORMATS, ExportFormat, export_reviewed
 from .llm import LLMUnavailable, check_llm, resolve_llm_model
 from .paragraphize import paragraphize, paragraphs_for
 from .serve import dump_labels_sidecar, serve_review
@@ -271,6 +273,42 @@ def serve_cmd(
     except LLMUnavailable as e:
         raise click.ClickException(str(e)) from e
     serve_review(audio_path, sidecar, port=port, open_browser=not no_open, vault=vault, llm_model=model)
+
+
+@main.command(name="export")
+@click.argument(
+    "source",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "-f",
+    "--format",
+    "fmt",
+    type=click.Choice(EXPORT_FORMATS),
+    default="json",
+    show_default=True,
+    help="json/csv: per-chunk rows with the audit trail (original text, both diarizers' labels, confidence, "
+    "what the reviewer changed). srt/vtt: speaker-labeled captions. md: the reviewed transcript.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Output path, or '-' for stdout (default: <transcript>.reviewed.<format> next to the sidecar).",
+)
+def export_cmd(source: Path, fmt: ExportFormat, output: Path | None) -> None:
+    """Export the reviewed transcript for SOURCE (an audio file or its .polyphony.json sidecar)."""
+    sidecar = source if source.name.endswith(".polyphony.json") else find_sidecar(source)
+    data = json.loads(sidecar.read_text())
+    rendered = export_reviewed(data, fmt)
+    if output is not None and str(output) == "-":
+        click.echo(rendered, nl=False)
+        return
+    if output is None:
+        output = sidecar.with_name(sidecar.name.removesuffix(".polyphony.json") + f".reviewed.{fmt}")
+    output.write_text(rendered)
+    click.echo(f"Wrote {output}", err=True)
 
 
 def find_sidecar(audio_path: Path) -> Path:

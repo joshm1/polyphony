@@ -84,28 +84,38 @@ def apply_review(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     return (summary_markdown(summary) + transcript if summary else transcript), skipped
 
 
-def render_reviewed_transcript(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
-    """Render the reviewed transcript from a sidecar payload carrying a `review` block.
+def reviewed_labels(data: dict[str, Any]) -> tuple[list[ChunkLabel], list[dict[str, Any]]]:
+    """The sidecar's labels with review decisions applied: speaker overrides set, word corrections made.
 
-    Returns (markdown, skipped) where `skipped` lists corrections whose
-    original span no longer appears in its chunk.
+    Confidence and notes stay as the pipeline produced them. Returns
+    (labels, skipped) where `skipped` lists corrections whose original span
+    no longer appears in its chunk.
     """
     overrides = overrides_of(data)
     corrections = resolve_corrections(
         data.get("asr_flags") or [], (data.get("review") or {}).get("word_decisions") or {}
     )
-
     labels: list[ChunkLabel] = []
     skipped: list[dict[str, Any]] = []
     for lbl in labels_from_payload(data):
         idx = lbl.chunk.idx
         text, missed = apply_corrections(lbl.chunk.text, corrections.get(idx, []))
         skipped.extend({"chunk_idx": idx, "original": m} for m in missed)
-        lbl.chunk = replace(lbl.chunk, text=text)
-        if (override := overrides.get(idx)) is not None:
+        labels.append(replace(lbl, chunk=replace(lbl.chunk, text=text), override=overrides.get(idx)))
+    return labels, skipped
+
+
+def render_reviewed_transcript(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Render the reviewed transcript from a sidecar payload carrying a `review` block.
+
+    Returns (markdown, skipped) where `skipped` lists corrections whose
+    original span no longer appears in its chunk.
+    """
+    labels, skipped = reviewed_labels(data)
+    for lbl in labels:
+        if lbl.override is not None:
             # A reviewer-assigned speaker is confirmed, so it shouldn't keep the turn flagged.
-            lbl.override, lbl.confidence, lbl.note = override, 100, "speaker set in review"
-        labels.append(lbl)
+            lbl.confidence, lbl.note = 100, "speaker set in review"
 
     breaks = data.get("paragraph_breaks")
     markdown = build_transcript(
