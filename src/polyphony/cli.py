@@ -29,6 +29,7 @@ from .transcript import build_transcript
 
 
 @click.group(invoke_without_command=True)
+@click.version_option(package_name="polyphony")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """polyphony — diarization you can audit.

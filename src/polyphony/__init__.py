@@ -1,5 +1,10 @@
-"""polyphony — audio → multi-speaker transcript with ensemble diarization."""
+"""polyphony — diarization you can audit."""
 
-from .cli import main
+from importlib.metadata import PackageNotFoundError, version
 
-__all__ = ["main"]
+try:
+    __version__ = version("polyphony")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.0.0"
+
+__all__ = ["__version__"]

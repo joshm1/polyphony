@@ -12,6 +12,7 @@ Cached on disk so iteration is fast after the first pass.
 from __future__ import annotations
 
 import tempfile
+from importlib.util import find_spec
 from pathlib import Path
 
 from loguru import logger
@@ -34,6 +35,12 @@ class LocalEnsembleBackend(Backend):
     name = "local"
 
     def preflight(self, cfg: BackendConfig) -> None:
+        missing = [mod for mod in ("torch", "transformers", "pyannote.audio") if find_spec(mod.split(".")[0]) is None]
+        if missing:
+            raise BackendUnavailable(
+                f"The local backend needs {', '.join(missing)}. Install polyphony with the `local` extra, "
+                'e.g. `uv tool install "polyphony[local] @ git+https://github.com/joshm1/polyphony"`.'
+            )
         try:
             preflight_pyannote()
         except PyannoteUnavailable as e:

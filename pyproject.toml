@@ -1,38 +1,49 @@
 [project]
 name = "polyphony"
 version = "0.1.0"
-description = "Audio → multi-speaker transcript with ensemble diarization, per-chunk confidence, and an interactive review playground."
+description = "Diarization you can audit: speaker-attributed transcripts with per-chunk confidence, a review UI to correct them, and exports of the corrected data."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
     { name = "Josh McDade", email = "josh.ncsu@gmail.com" }
 ]
 requires-python = ">=3.12"
-keywords = ["speech-to-text", "diarization", "whisper", "pyannote", "gemini", "transcription", "asr", "ensemble"]
+keywords = ["speech-to-text", "diarization", "speaker-diarization", "transcription", "whisper", "pyannote", "asr", "subtitles", "journalism", "podcast"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
     "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 dependencies = [
     "assemblyai>=0.40",
     "click>=8.1",
     "fastapi>=0.135.3",
     "google-genai>=0.8",
-    "librosa>=0.10",
     "loguru>=0.7",
-    "numpy>=1.26",
+    "pydantic>=2.10",
+    "pydantic-ai-slim[anthropic,google,openai]>=2.48",
+    "uvicorn[standard]>=0.44.0",
+]
+
+[project.optional-dependencies]
+# The offline `local` backend: Whisper + pyannote. Several GB of model runtime,
+# so it's opt-in: `uv tool install "polyphony[local] @ git+https://github.com/joshm1/polyphony"`.
+local = [
     "pyannote-audio>=3.1",
-    "pydantic-ai-slim[openai]>=2.48",
-    "soundfile>=0.12",
     "torch>=2.2",
     "torchaudio>=2.2",
     "transformers>=4.40",
-    "uvicorn[standard]>=0.44.0",
 ]
 
 [project.urls]
@@ -41,7 +52,7 @@ Repository = "https://github.com/joshm1/polyphony"
 Issues = "https://github.com/joshm1/polyphony/issues"
 
 [project.scripts]
-polyphony = "polyphony:main"
+polyphony = "polyphony.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.28,<0.10.0"]
