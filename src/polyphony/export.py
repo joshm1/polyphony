@@ -12,14 +12,14 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from .review import apply_review, labels_from_payload, reviewed_labels
 from .transcript import display_name
 from .types import ChunkLabel
 
 ExportFormat = Literal["json", "csv", "srt", "vtt", "md"]
-EXPORT_FORMATS: tuple[ExportFormat, ...] = ("json", "csv", "srt", "vtt", "md")
+EXPORT_FORMATS: tuple[ExportFormat, ...] = get_args(ExportFormat)
 
 _CSV_COLUMNS: tuple[str, ...] = (
     "idx",
